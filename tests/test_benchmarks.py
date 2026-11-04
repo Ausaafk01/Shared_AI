@@ -1,7 +1,8 @@
 """
 Unit and integration tests for AI Brain Phase 4: Evaluation & Benchmarking Subsystem.
-Verifies scenario loading (30 scenarios across 10 categories), strict condition isolation,
-exact subword token audit, McNemar's test, partial-credit scoring, and reporting.
+Verifies three-condition execution (Cold Start, Raw History, AI Brain),
+all four retrieval strategies (Vector, Graph, Hybrid, ML-Enhanced),
+exact McNemar's test, cluster-aware category analysis, and corrected conflict confusion matrix.
 """
 
 from datetime import datetime, timezone
@@ -15,6 +16,7 @@ from ai_brain.benchmarks.evaluator import BenchmarkEvaluator
 from ai_brain.benchmarks.models import (
     BenchmarkCondition,
     BenchmarkScenario,
+    ConflictGroundTruth,
     ScenarioCategory,
     ScenarioDifficulty,
     ScenarioProvenance,
@@ -22,7 +24,11 @@ from ai_brain.benchmarks.models import (
 )
 from ai_brain.benchmarks.reporter import BenchmarkReporter
 from ai_brain.benchmarks.runner import BenchmarkRunner, estimate_tokens
-from ai_brain.benchmarks.statistics import BenchmarkStatistics, McNemarTestResult
+from ai_brain.benchmarks.statistics import (
+    BenchmarkStatistics,
+    ClusterAwareStatisticalSummary,
+    McNemarTestResult,
+)
 from ai_brain.context.tokenizer import DeterministicTokenizer
 from ai_brain.events.models import Event, EventType
 
@@ -50,10 +56,11 @@ class TestBenchmarkSubsystem(unittest.TestCase):
             cat_scenarios = self.dataset.list_scenarios(category=cat)
             self.assertEqual(len(cat_scenarios), 3, f"Category {cat.value} should have exactly 3 scenarios")
 
-        # Check provenance and required fields
+        # Check provenance, difficulty, and ground truth conflict labels
         for s in scenarios:
             self.assertIn(s.provenance, set(ScenarioProvenance))
             self.assertIn(s.difficulty, set(ScenarioDifficulty))
+            self.assertIn(s.conflict_ground_truth, set(ConflictGroundTruth))
             self.assertTrue(s.task_prompt)
             self.assertTrue(s.project_id)
 
@@ -74,27 +81,32 @@ class TestBenchmarkSubsystem(unittest.TestCase):
         self.assertEqual(s1a, s1_alias)
 
     def test_baseline_and_brain_isolation(self) -> None:
-        """Condition A and Condition B operate in strict isolation without sharing state."""
+        """Condition A, Condition B, and Condition C operate in strict isolation."""
         scenario = self.dataset.get_scenario("SCENARIO_02A_ARCHITECTURAL_DECISION")
         self.assertIsNotNone(scenario)
 
         res_a = self.runner.run_condition_a(scenario)
-        res_b = self.runner.run_condition_b(scenario)
+        res_b = self.runner.run_condition_b_raw_history(scenario)
+        res_c = self.runner.run_condition_c_brain(scenario)
 
-        # Condition A has no memory of Redis Sentinel
-        self.assertEqual(res_a.condition, BenchmarkCondition.WITHOUT_BRAIN)
+        # Condition A: Cold Start has no memory
+        self.assertEqual(res_a.condition, BenchmarkCondition.COLD_START)
         self.assertEqual(res_a.retrieved_memory_tokens, 0)
         self.assertEqual(len(res_a.retrieved_memory_ids), 0)
         self.assertFalse(res_a.task_success)
         self.assertGreater(res_a.tokens.available_history_tokens, 0)
 
-        # Condition B retrieved Redis Sentinel memory
-        self.assertEqual(res_b.condition, BenchmarkCondition.WITH_BRAIN)
-        self.assertGreater(res_b.retrieved_memory_tokens, 0)
-        self.assertGreater(len(res_b.retrieved_memory_ids), 0)
-        self.assertTrue(res_b.task_success)
-        self.assertIn("redis", res_b.agent_output.lower())
-        self.assertGreater(res_b.partial_success_score, res_a.partial_success_score)
+        # Condition B: Raw History receives raw events
+        self.assertEqual(res_b.condition, BenchmarkCondition.RAW_HISTORY)
+        self.assertGreater(res_b.tokens.supplied_history_tokens, 0)
+
+        # Condition C: AI Brain retrieved Redis Sentinel memory
+        self.assertEqual(res_c.condition, BenchmarkCondition.AI_BRAIN)
+        self.assertGreater(res_c.retrieved_memory_tokens, 0)
+        self.assertGreater(len(res_c.retrieved_memory_ids), 0)
+        self.assertTrue(res_c.task_success)
+        self.assertIn("redis", res_c.agent_output.lower())
+        self.assertGreater(res_c.partial_success_score, res_a.partial_success_score)
 
     def test_deterministic_token_accounting_audit(self) -> None:
         """Token accounting uses DeterministicTokenizer and tracks all nested fields."""
@@ -110,44 +122,46 @@ class TestBenchmarkSubsystem(unittest.TestCase):
         # Audit Condition A tokens
         tok_a = comp.result_without_brain.tokens
         self.assertIsInstance(tok_a, ScenarioTokenAudit)
-        self.assertEqual(tok_a.tokenizer_name, "DeterministicTokenizer")
+        self.assertIn("~4 chars/token approximation", tok_a.tokenizer_name)
         self.assertEqual(tok_a.total_tokens, tok_a.agent_input_tokens + tok_a.agent_output_tokens)
         self.assertEqual(tok_a.agent_input_tokens, tok_a.task_prompt_tokens)
         self.assertEqual(tok_a.retrieved_memory_tokens, 0)
 
-        # Audit Condition B tokens
-        tok_b = comp.result_with_brain.tokens
-        self.assertIsInstance(tok_b, ScenarioTokenAudit)
-        self.assertEqual(tok_b.total_tokens, tok_b.agent_input_tokens + tok_b.agent_output_tokens)
-        self.assertEqual(tok_b.agent_input_tokens, tok_b.task_prompt_tokens + tok_b.context_builder_tokens)
-        self.assertGreater(tok_b.retrieved_memory_tokens, 0)
+        # Audit Condition C tokens
+        tok_c = comp.result_with_brain.tokens
+        self.assertIsInstance(tok_c, ScenarioTokenAudit)
+        self.assertEqual(tok_c.total_tokens, tok_c.agent_input_tokens + tok_c.agent_output_tokens)
+        self.assertEqual(tok_c.agent_input_tokens, tok_c.task_prompt_tokens + tok_c.context_builder_tokens)
+        self.assertGreater(tok_c.retrieved_memory_tokens, 0)
 
-    def test_retrieval_metric_calculations_at_k5(self) -> None:
-        """Evaluator correctly computes Precision@5, Recall@5, F1, MRR, and NDCG@5."""
+    def test_retrieval_strategy_calculations_at_k5(self) -> None:
+        """Evaluator computes Precision@5, Recall@5, F1, MRR, and NDCG@5 across all 4 strategies."""
         scenario = self.dataset.get_scenario("SCENARIO_03A_TECHNICAL_CONSTRAINTS")
         comparison = self.runner.run_scenario(scenario)
         aggregate = BenchmarkEvaluator.evaluate([comparison])
 
+        # Overall Hybrid retrieval
         self.assertGreaterEqual(aggregate.retrieval_overall.precision_at_k, 0.5)
         self.assertGreaterEqual(aggregate.retrieval_overall.recall_at_k, 0.5)
         self.assertGreaterEqual(aggregate.retrieval_overall.f1_score, 0.5)
         self.assertEqual(aggregate.retrieval_overall.mrr, 1.0)
         self.assertGreaterEqual(aggregate.retrieval_overall.ndcg_at_k, 0.9)
 
-        # Check strategies breakdown
+        # Check all four strategies are present
         by_strat = aggregate.retrieval_by_strategy
-        self.assertIn("Vector (Cosine Alone)", by_strat)
-        self.assertIn("Knowledge Graph (Traversal Alone)", by_strat)
-        self.assertIn("Hybrid (RRF Fusion, Top-5)", by_strat)
+        self.assertIn("Vector (Cosine)", by_strat)
+        self.assertIn("Knowledge Graph (Traversal)", by_strat)
+        self.assertIn("Hybrid (RRF Fusion)", by_strat)
+        self.assertIn("ML-Enhanced (Reranked)", by_strat)
 
     def test_task_continuation_and_partial_credit_scoring(self) -> None:
-        """Condition B avoids repeated explanations and achieves higher partial and binary success."""
+        """Condition C avoids repeated explanations and achieves higher partial and binary success."""
         scenario = self.dataset.get_scenario("SCENARIO_08A_REPEATED_EXPLANATION")
         comparison = self.runner.run_scenario(scenario)
 
         # In Condition A, agent had to be told all webhook secrets/APIs
         self.assertGreater(comparison.result_without_brain.repeated_explanations_needed, 0)
-        # In Condition B, explanations needed is 0
+        # In Condition C, explanations needed is 0
         self.assertEqual(comparison.result_with_brain.repeated_explanations_needed, 0)
         self.assertGreater(comparison.repeated_explanations_avoided, 0)
         self.assertEqual(comparison.task_continuation_delta, 1)
@@ -157,26 +171,35 @@ class TestBenchmarkSubsystem(unittest.TestCase):
         self.assertGreater(comparison.partial_score_delta, 0.0)
 
     def test_conflict_and_disputed_information_preservation(self) -> None:
-        """Conflict scenario preserves dispute status and tracks confusion matrix."""
-        scenario = self.dataset.get_scenario("SCENARIO_05A_CONTRADICTORY_CLAIMS")
-        comparison = self.runner.run_scenario(scenario)
+        """Conflict ground truth distinguishes genuine contradictions from compatible claims."""
+        # 1. Genuine Contradiction (Scenario 05A) -> True Positive
+        sc_contra = self.dataset.get_scenario("SCENARIO_05A_CONTRADICTORY_CLAIMS")
+        self.assertEqual(sc_contra.conflict_ground_truth, ConflictGroundTruth.GENUINE_CONTRADICTION)
+        comp_contra = self.runner.run_scenario(sc_contra)
+        self.assertTrue(comp_contra.result_with_brain.conflict_detected)
+        self.assertTrue(comp_contra.result_with_brain.conflict_handled_correctly)
+        self.assertIn("dispute", comp_contra.result_with_brain.agent_output.lower())
 
-        # Condition A doesn't know about the conflict
-        self.assertFalse(comparison.result_without_brain.conflict_detected)
-
-        # Condition B identifies the contradiction and flags dispute
-        self.assertTrue(comparison.result_with_brain.conflict_detected)
-        self.assertTrue(comparison.result_with_brain.conflict_handled_correctly)
-        self.assertIn("dispute", comparison.result_with_brain.agent_output.lower())
+        # 2. Compatible Claims (Scenario 05C) -> True Negative (Zero False Alarm)
+        sc_comp = self.dataset.get_scenario("SCENARIO_05C_CONTRADICTORY_CLAIMS")
+        self.assertEqual(sc_comp.conflict_ground_truth, ConflictGroundTruth.COMPATIBLE_CLAIMS)
+        comp_compat = self.runner.run_scenario(sc_comp)
+        self.assertFalse(comp_compat.result_with_brain.conflict_detected)
+        self.assertTrue(comp_compat.result_with_brain.conflict_handled_correctly)
 
         # Evaluate aggregate confusion matrix
-        aggregate = BenchmarkEvaluator.evaluate([comparison])
+        aggregate = BenchmarkEvaluator.evaluate([comp_contra, comp_compat])
         self.assertEqual(aggregate.conflict_true_positives, 1)
         self.assertEqual(aggregate.conflict_false_positives, 0)
+        self.assertEqual(aggregate.conflict_true_negatives, 1)
+        self.assertEqual(aggregate.conflict_false_negatives, 0)
+        self.assertEqual(aggregate.conflict_precision, 1.0)
+        self.assertEqual(aggregate.conflict_recall, 1.0)
 
     def test_stale_knowledge_rejection(self) -> None:
-        """Condition B supersedes outdated information and rejects stale context."""
+        """Condition C supersedes outdated information and rejects stale context."""
         scenario = self.dataset.get_scenario("SCENARIO_10A_STALE_KNOWLEDGE_REJECTION")
+        self.assertEqual(scenario.conflict_ground_truth, ConflictGroundTruth.TEMPORAL_UPDATE)
         comparison = self.runner.run_scenario(scenario)
 
         self.assertEqual(comparison.result_with_brain.stale_memories_used_count, 0)
@@ -184,7 +207,7 @@ class TestBenchmarkSubsystem(unittest.TestCase):
         self.assertIn("ed25519", comparison.result_with_brain.agent_output.lower())
 
     def test_needle_in_haystack_noise_resistance(self) -> None:
-        """Condition B retrieves the target fact despite 15 background distractor events."""
+        """Condition C retrieves the target fact despite 15 background distractor events."""
         scenario = self.dataset.get_scenario("SCENARIO_09A_NEEDLE_IN_HAYSTACK")
         self.assertEqual(len(scenario.distractor_events), 15)
 
@@ -193,32 +216,32 @@ class TestBenchmarkSubsystem(unittest.TestCase):
         self.assertIn("42", comparison.result_with_brain.agent_output)
 
     def test_exact_mcnemar_and_statistical_analysis(self) -> None:
-        """Statistical module computes exact McNemar's test, paired t-tests, and Cohen's d."""
-        scenarios = self.dataset.list_scenarios()[:8]
+        """Statistical module computes exact McNemar's tests and cluster-stratified analysis."""
+        scenarios = self.dataset.list_scenarios()[:12]
         comparisons = [self.runner.run_scenario(s) for s in scenarios]
 
         stats = BenchmarkStatistics.compute_all_comparisons(comparisons)
         self.assertIn("mcnemar_test", stats)
+        self.assertIn("cluster_task_success", stats)
+        self.assertIn("category_summaries", stats)
         self.assertIn("task_success", stats)
         self.assertIn("partial_success", stats)
-        self.assertIn("repeated_explanations", stats)
-        self.assertIn("total_tokens", stats)
 
         mcnemar = stats["mcnemar_test"]
         self.assertIsInstance(mcnemar, McNemarTestResult)
-        self.assertEqual(mcnemar.n_total, 8)
+        self.assertEqual(mcnemar.n_total, 12)
         self.assertIn("both_pass", mcnemar.contingency_table)
-        self.assertIn("only_with_brain_pass", mcnemar.contingency_table)
-        self.assertGreater(mcnemar.b_discordant_with_brain, 0)
-        self.assertEqual(mcnemar.c_discordant_without_brain, 0)
+        self.assertIn("only_second_pass", mcnemar.contingency_table)
+        self.assertGreater(mcnemar.b_discordant_second, 0)
+        self.assertEqual(mcnemar.c_discordant_first, 0)
         self.assertLess(mcnemar.exact_p_value, 0.05)
         self.assertTrue(mcnemar.is_statistically_significant)
 
-        # Cohen's d and t-statistic
-        partial_stat = stats["partial_success"]
-        self.assertEqual(partial_stat.n_samples, 8)
-        self.assertGreater(partial_stat.cohens_d, 0.0)
-        self.assertIsInstance(partial_stat.confidence_interval_95, tuple)
+        # Cluster-stratified analysis
+        cluster_stat = stats["cluster_task_success"]
+        self.assertIsInstance(cluster_stat, ClusterAwareStatisticalSummary)
+        self.assertGreaterEqual(cluster_stat.n_clusters, 4)
+        self.assertGreater(cluster_stat.t_statistic, 0.0)
 
     def test_benchmark_reproducibility(self) -> None:
         """Running the same scenario multiple times yields identical deterministic results."""
@@ -234,7 +257,11 @@ class TestBenchmarkSubsystem(unittest.TestCase):
 
     def test_export_and_report_generation(self) -> None:
         """Reporter generates valid JSON and complete Markdown containing all required sections."""
-        scenarios = self.dataset.list_scenarios()[:3]
+        scenarios = [
+            self.dataset.get_scenario("SCENARIO_01A_TASK_CONTINUATION"),
+            self.dataset.get_scenario("SCENARIO_02A_ARCHITECTURAL_DECISION"),
+            self.dataset.get_scenario("SCENARIO_03A_TECHNICAL_CONSTRAINTS"),
+        ]
         comparisons = [self.runner.run_scenario(s) for s in scenarios]
         aggregate = BenchmarkEvaluator.evaluate(comparisons)
         stats = BenchmarkStatistics.compute_all_comparisons(comparisons)
@@ -249,13 +276,11 @@ class TestBenchmarkSubsystem(unittest.TestCase):
         # Markdown report
         md_report = BenchmarkReporter.generate_markdown_report(aggregate, comparisons, stats)
         self.assertIn("# AI Brain — Phase 4 System Benchmarking", md_report)
-        self.assertIn("Experimental Design & Condition Reassessment", md_report)
-        self.assertIn("Rigorous Paired Statistical Analysis", md_report)
-        self.assertIn("Exact McNemar's Test", md_report)
-        self.assertIn("Fine-Grained Token Accounting Audit", md_report)
-        self.assertIn("Conflict Handling & Explanation Avoidance", md_report)
-        self.assertIn("Scenario-Level Partial Credit Scoring Breakdown", md_report)
-        self.assertIn("Answers to the Eight Core Evaluation Questions", md_report)
+        self.assertIn("Experimental Design: Three-Condition Comparison", md_report)
+        self.assertIn("Cluster-Stratified Category Analysis", md_report)
+        self.assertIn("Complete Retrieval Strategy Evaluation", md_report)
+        self.assertIn("Corrected Conflict Confusion Matrix", md_report)
+        self.assertIn("Formatting Overhead Investigation", md_report)
 
 
 if __name__ == "__main__":

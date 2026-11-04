@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from ai_brain.benchmarks.models import (
     BenchmarkScenario,
+    ConflictGroundTruth,
     ScenarioCategory,
     ScenarioDifficulty,
     ScenarioProvenance,
@@ -323,6 +324,7 @@ class BenchmarkDataset:
                 expected_decisions=("gRPC protobuf on port 9090",),
                 expected_constraints=("port 9090",),
                 expected_conflicts=(),
+                conflict_ground_truth=ConflictGroundTruth.TEMPORAL_UPDATE,
             )
         )
 
@@ -346,6 +348,7 @@ class BenchmarkDataset:
                 expected_decisions=("15-minute sliding window",),
                 expected_constraints=("15-minute", "8-hour"),
                 expected_conflicts=(),
+                conflict_ground_truth=ConflictGroundTruth.TEMPORAL_UPDATE,
             )
         )
 
@@ -369,6 +372,7 @@ class BenchmarkDataset:
                 expected_decisions=("stream via Fluentd socket on port 24224",),
                 expected_constraints=("port 24224",),
                 expected_conflicts=(),
+                conflict_ground_truth=ConflictGroundTruth.TEMPORAL_UPDATE,
             )
         )
 
@@ -395,6 +399,7 @@ class BenchmarkDataset:
                 expected_decisions=(),
                 expected_constraints=(),
                 expected_conflicts=("MariaDB 10.11", "PostgreSQL 16"),
+                conflict_ground_truth=ConflictGroundTruth.GENUINE_CONTRADICTION,
             )
         )
 
@@ -418,6 +423,7 @@ class BenchmarkDataset:
                 expected_decisions=(),
                 expected_constraints=(),
                 expected_conflicts=("deprecated", "active long-term stable"),
+                conflict_ground_truth=ConflictGroundTruth.GENUINE_CONTRADICTION,
             )
         )
 
@@ -441,6 +447,7 @@ class BenchmarkDataset:
                 expected_decisions=(),
                 expected_constraints=(),
                 expected_conflicts=(),  # Zero conflicts expected
+                conflict_ground_truth=ConflictGroundTruth.COMPATIBLE_CLAIMS,
             )
         )
 
@@ -768,6 +775,7 @@ class BenchmarkDataset:
                 expected_decisions=("OAuth2 Bearer with Ed25519 signatures",),
                 expected_constraints=("Ed25519",),
                 expected_conflicts=(),
+                conflict_ground_truth=ConflictGroundTruth.TEMPORAL_UPDATE,
             )
         )
 
@@ -791,6 +799,7 @@ class BenchmarkDataset:
                 expected_decisions=("Python 3.12 on Debian bookworm",),
                 expected_constraints=("Python 3.12",),
                 expected_conflicts=(),
+                conflict_ground_truth=ConflictGroundTruth.TEMPORAL_UPDATE,
             )
         )
 
@@ -814,5 +823,6 @@ class BenchmarkDataset:
                 expected_decisions=("served via CloudFront CDN distribution",),
                 expected_constraints=("https://cdn.example.com",),
                 expected_conflicts=(),
+                conflict_ground_truth=ConflictGroundTruth.TEMPORAL_UPDATE,
             )
         )

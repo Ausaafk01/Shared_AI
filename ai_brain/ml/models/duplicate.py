@@ -150,22 +150,7 @@ class DuplicateDetectionModel(BaseMLModel):
 
         feats = self.extract_pair_features(m1, m2)
 
-        # Contradiction gate: negation contrast or disparate ports/configs on same subject
-        if feats["has_negation_contrast"] > 0.0 or (feats["subject_match"] > 0.0 and feats["jaccard_word_similarity"] > 0.4 and feats["exact_content_match"] == 0.0):
-            # Check for conflict
-            from ai_brain.memories.conflicts.detector import ConflictDetector
-            det = ConflictDetector()
-            conf = det.detect_pair(m1, m2)
-            if conf:
-                return ModelPrediction(
-                    target_value=DuplicateClassification.CONTRADICTORY.value,
-                    confidence=0.92,
-                    feature_contributions=MappingProxyType(feats),
-                    model_version=self.metadata.version if self.metadata else "v1.0",
-                    fallback_used=False,
-                    explanation=f"Detected genuine contradiction: '{conf.description}'",
-                )
-
+        # 2. Exact match check
         if feats["exact_content_match"] == 1.0:
             return ModelPrediction(
                 target_value=DuplicateClassification.EXACT_DUPLICATE.value,
@@ -176,50 +161,123 @@ class DuplicateDetectionModel(BaseMLModel):
                 explanation="Byte-for-byte exact content match",
             )
 
-        # Scored semantic duplicate prediction
-        sim_score = (
-            feats["jaccard_word_similarity"] * 0.5 +
-            feats["char_length_ratio"] * 0.2 +
-            feats["same_memory_type"] * 0.15 +
-            feats["subject_match"] * 0.15
-        )
+        # 3. Contradiction gate: negation contrast or conflicting assertions on same subject
+        if feats["has_negation_contrast"] > 0.0 or (feats["subject_match"] > 0.0 and feats["jaccard_word_similarity"] > 0.35 and feats["exact_content_match"] == 0.0):
+            from ai_brain.memories.conflicts.detector import ConflictDetector
+            det = ConflictDetector()
+            conf = det.detect_pair(m1, m2)
+            if conf:
+                return ModelPrediction(
+                    target_value=DuplicateClassification.CONTRADICTORY.value,
+                    confidence=0.92,
+                    feature_contributions=MappingProxyType(feats),
+                    model_version=self.metadata.version if self.metadata else "v1.0",
+                    fallback_used=False,
+                    explanation=f"Contradiction gate: detected genuine dispute '{conf.description}'",
+                )
 
-        if sim_score >= 0.75:
+        # 4. Learned logistic prediction
+        raw_logit = self.bias
+        contributions = {}
+        for f in self.FEATURE_NAMES:
+            val = feats.get(f, 0.0)
+            w = self.weights.get(f, 0.0)
+            contrib = w * val
+            contributions[f] = round(contrib, 4)
+            raw_logit += contrib
+
+        prob = 1.0 / (1.0 + math.exp(-max(-15.0, min(15.0, raw_logit))))
+
+        if prob >= 0.5:
             pred_class = DuplicateClassification.SEMANTIC_DUPLICATE.value
-            conf = min(0.95, sim_score)
-            expl = f"High semantic overlap ({sim_score:.2f}) on same subject without contradiction"
+            conf = min(0.95, max(0.65, prob))
+            expl = f"Supervised logistic model predicts semantic duplicate (p={prob:.3f}, logit={raw_logit:.2f})"
         else:
             pred_class = DuplicateClassification.RELATED_DISTINCT.value
-            conf = max(0.7, 1.0 - sim_score)
-            expl = f"Distinct knowledge ({sim_score:.2f} similarity score below duplicate threshold)"
+            conf = min(0.95, max(0.65, 1.0 - prob))
+            expl = f"Supervised logistic model predicts distinct knowledge (p={prob:.3f} below duplicate threshold)"
 
         return ModelPrediction(
             target_value=pred_class,
             confidence=round(conf, 4),
-            feature_contributions=MappingProxyType(feats),
+            probabilities=MappingProxyType({"duplicate_prob": round(prob, 4), "distinct_prob": round(1.0 - prob, 4)}),
+            feature_contributions=MappingProxyType(contributions),
             model_version=self.metadata.version if self.metadata else "v1.0",
             fallback_used=False,
             explanation=expl,
         )
 
-    def train(self, dataset: DatasetSplit, **kwargs: Any) -> Dict[str, float]:
+    def train(
+        self,
+        dataset: DatasetSplit,
+        *,
+        learning_rate: float = 0.05,
+        epochs: int = 60,
+        l2_reg: float = 0.01,
+        **kwargs: Any,
+    ) -> Dict[str, float]:
         train_examples = dataset.train_examples
         if not train_examples:
             raise ModelNotTrainedError("Cannot train with empty dataset split")
 
+        from ai_brain.ml.training.evaluator import ModelEvaluator
+
+        weights = {f: 0.0 for f in self.FEATURE_NAMES}
+        weights["exact_content_match"] = 3.0
+        weights["jaccard_word_similarity"] = 2.0
+        weights["char_length_ratio"] = 1.0
+        weights["same_memory_type"] = 1.0
+        weights["subject_match"] = 1.5
+        weights["has_negation_contrast"] = -3.0
+        bias = -1.0
+
+        n = len(train_examples)
+        for _ in range(epochs):
+            grad_w = {f: 0.0 for f in self.FEATURE_NAMES}
+            grad_b = 0.0
+
+            for ex in train_examples:
+                y = 1.0 if (ex.label in (1, 1.0, True, "SEMANTIC_DUPLICATE", "EXACT_DUPLICATE")) else 0.0
+                logit = bias + sum(weights[f] * ex.features.get(f, 0.0) for f in self.FEATURE_NAMES)
+                p = 1.0 / (1.0 + math.exp(-max(-15.0, min(15.0, logit))))
+                err = p - y
+
+                grad_b += err
+                for f in self.FEATURE_NAMES:
+                    grad_w[f] += err * ex.features.get(f, 0.0)
+
+            bias -= learning_rate * (grad_b / n)
+            for f in self.FEATURE_NAMES:
+                weights[f] -= learning_rate * ((grad_w[f] / n) + (l2_reg * weights[f]))
+
+        self.weights = weights
+        self.bias = bias
         self._is_trained = True
+
+        val_true, val_pred, val_prob = [], [], []
+        for ex in dataset.validation_examples:
+            y = 1 if (ex.label in (1, 1.0, True, "SEMANTIC_DUPLICATE", "EXACT_DUPLICATE")) else 0
+            logit = bias + sum(weights[f] * ex.features.get(f, 0.0) for f in self.FEATURE_NAMES)
+            p = 1.0 / (1.0 + math.exp(-max(-15.0, min(15.0, logit))))
+            val_true.append(y)
+            val_prob.append(p)
+            val_pred.append(1 if p >= 0.5 else 0)
+
+        metrics_obj = ModelEvaluator.evaluate_binary_classification(val_true, val_pred, val_prob)
+        metrics = metrics_obj.to_dict()
+
         self.metadata = ModelMetadata(
             model_name="DuplicateDetectionModel",
             model_type=ModelType.DUPLICATE,
             version="1.0.0",
             created_at=datetime.now(timezone.utc),
             feature_names=self.FEATURE_NAMES,
-            parameters=MappingProxyType({"threshold": 0.75}),
-            metrics=MappingProxyType({"accuracy": 0.94}),
+            parameters=MappingProxyType({"weights": self.weights, "bias": self.bias, "threshold": 0.5}),
+            metrics=MappingProxyType(metrics),
             training_data_provenance=dataset.name,
-            description="Calibrated pair duplicate vs contradictory classifier",
+            description="Supervised regularized logistic regression for pair duplicate detection",
         )
-        return {"accuracy": 0.94}
+        return metrics
 
     def save(self, filepath: str) -> None:
         data = {

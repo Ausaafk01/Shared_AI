@@ -166,14 +166,23 @@ class StalenessDetectionModel(BaseMLModel):
         self.bias = bias
         self._is_trained = True
 
+        from ai_brain.ml.training.evaluator import ModelEvaluator
+
+        val_true, val_pred, val_prob = [], [], []
         val_errors = []
         for ex in dataset.validation_examples:
             y = float(ex.label)
             logit = bias + sum(weights[f] * ex.features.get(f, 0.0) for f in self.FEATURE_NAMES)
             p = 1.0 / (1.0 + math.exp(-max(-15.0, min(15.0, logit))))
             val_errors.append(abs(p - y))
+            val_true.append(1 if y >= 0.5 else 0)
+            val_prob.append(p)
+            val_pred.append(1 if p >= 0.5 else 0)
 
         mae = sum(val_errors) / len(val_errors) if val_errors else 0.0
+        clf_metrics = ModelEvaluator.evaluate_binary_classification(val_true, val_pred, val_prob)
+        metrics = clf_metrics.to_dict()
+        metrics["mae"] = round(mae, 4)
 
         self.metadata = ModelMetadata(
             model_name="StalenessDetectionModel",
@@ -182,11 +191,11 @@ class StalenessDetectionModel(BaseMLModel):
             created_at=datetime.now(timezone.utc),
             feature_names=self.FEATURE_NAMES,
             parameters=MappingProxyType({"weights": self.weights, "bias": self.bias}),
-            metrics=MappingProxyType({"validation_mae": mae}),
+            metrics=MappingProxyType(metrics),
             training_data_provenance=dataset.name,
-            description="Calibrated multi-factor obsolescence risk model",
+            description="Calibrated regularized logistic obsolescence risk model",
         )
-        return {"mae": mae}
+        return metrics
 
     def save(self, filepath: str) -> None:
         data = {

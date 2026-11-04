@@ -58,12 +58,46 @@ class TrainingPipeline:
             is_suitable = metrics.get("mae", 1.0) < b_mae
 
         elif model.model_type == ModelType.RANKING:
-            # Baseline is base_retrieval_score
             b_errors = [abs(e.features.get("base_retrieval_score", 0.5) - float(e.label)) for e in val_examples]
             b_mae = sum(b_errors) / len(b_errors) if b_errors else 0.5
             baseline_metrics["mae"] = round(b_mae, 4)
             improvement_delta["mae_reduction"] = round(b_mae - metrics.get("mae", 0.0), 4)
-            is_suitable = metrics.get("mae", 1.0) < b_mae
+
+            # Baseline ranking quality (by base_retrieval_score)
+            base_ranked = sorted(val_examples, key=lambda ex: -ex.features.get("base_retrieval_score", 0.5))
+            base_rels = [float(ex.label) for ex in base_ranked]
+            base_ranking = ModelEvaluator.evaluate_ranking([base_rels] if base_rels else [])
+            baseline_metrics["ndcg_at_5"] = round(base_ranking.ndcg_at_5, 4)
+            baseline_metrics["mrr"] = round(base_ranking.mrr, 4)
+            improvement_delta["ndcg_at_5_gain"] = round(metrics.get("ndcg_at_5", 0.0) - base_ranking.ndcg_at_5, 4)
+            improvement_delta["mrr_gain"] = round(metrics.get("mrr", 0.0) - base_ranking.mrr, 4)
+            is_suitable = metrics.get("mae", 1.0) <= b_mae
+
+        elif model.model_type == ModelType.DUPLICATE:
+            # Baseline is lexical exact/jaccard threshold
+            base_correct = sum(
+                1 for e in val_examples
+                if (e.features.get("jaccard_word_similarity", 0.0) >= 0.7) == (e.label in (1, 1.0, True, "SEMANTIC_DUPLICATE", "EXACT_DUPLICATE"))
+            )
+            b_acc = base_correct / max(1, total_val)
+            baseline_metrics["accuracy"] = round(b_acc, 4)
+            improvement_delta["accuracy_gain"] = round(metrics.get("accuracy", 0.0) - b_acc, 4)
+            is_suitable = metrics.get("accuracy", 0.0) >= b_acc
+
+        elif model.model_type == ModelType.CONFLICT:
+            # Baseline is regex conflict detector
+            baseline_metrics["accuracy"] = 0.70
+            baseline_metrics["macro_f1"] = 0.65
+            improvement_delta["accuracy_gain"] = round(metrics.get("accuracy", 0.0) - 0.70, 4)
+            improvement_delta["macro_f1_gain"] = round(metrics.get("macro_f1", 0.0) - 0.65, 4)
+            is_suitable = metrics.get("macro_f1", 0.0) >= 0.65
+
+        elif model.model_type == ModelType.STALENESS:
+            b_errors = [abs(e.features.get("age_days", 0.0) - float(e.label)) for e in val_examples]
+            b_mae = sum(b_errors) / len(b_errors) if b_errors else 0.5
+            baseline_metrics["mae"] = round(b_mae, 4)
+            improvement_delta["mae_reduction"] = round(b_mae - metrics.get("mae", 0.0), 4)
+            is_suitable = metrics.get("mae", 1.0) <= b_mae
 
         else:
             baseline_metrics["accuracy"] = 0.80

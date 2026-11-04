@@ -5,7 +5,7 @@ Comparison and relationship detection between Memory instances.
 from dataclasses import dataclass
 from enum import StrEnum
 import re
-from typing import Optional
+from typing import Any, Optional
 
 from ai_brain.memories.models import Memory
 
@@ -52,7 +52,10 @@ def extract_memory_subject(content: str) -> Optional[str]:
 
 
 class MemoryComparator:
-    """Deterministic comparator for determining update, duplicate, or conflict relationships."""
+    """Deterministic comparator with optional ML-assisted duplicate and contradiction classification."""
+
+    def __init__(self, ml_duplicate_model: Optional[Any] = None) -> None:
+        self.ml_duplicate_model = ml_duplicate_model
 
     def compare(self, existing: Memory, incoming: Memory) -> ComparisonResult:
         """
@@ -108,6 +111,34 @@ class MemoryComparator:
                 relation=MemoryRelation.DISTINCT,
                 reason=f"Different memory types ({existing.memory_type} vs {incoming.memory_type}) represent distinct knowledge",
             )
+
+        # 4b. Optional ML duplicate classification when trained model is configured
+        if self.ml_duplicate_model is not None and getattr(self.ml_duplicate_model, "is_trained", False):
+            try:
+                ml_pred = self.ml_duplicate_model.predict((existing, incoming))
+                if not ml_pred.fallback_used and ml_pred.confidence >= 0.70:
+                    target = str(ml_pred.target_value)
+                    if target == "EXACT_DUPLICATE":
+                        return ComparisonResult(
+                            relation=MemoryRelation.IDENTICAL,
+                            similarity=1.0,
+                            reason=f"ML detected exact duplicate: {ml_pred.explanation}",
+                        )
+                    elif target == "SEMANTIC_DUPLICATE":
+                        return ComparisonResult(
+                            relation=MemoryRelation.DUPLICATE,
+                            similarity=ml_pred.confidence,
+                            reason=f"ML detected semantic duplicate: {ml_pred.explanation}",
+                        )
+                    elif target == "CONTRADICTORY":
+                        return ComparisonResult(
+                            relation=MemoryRelation.CONTRADICTORY,
+                            subject=extract_memory_subject(incoming.content),
+                            similarity=ml_pred.confidence,
+                            reason=f"ML detected contradiction: {ml_pred.explanation}",
+                        )
+            except Exception:
+                pass  # Gracefully fall back to deterministic logic below
 
         # 5. Subject-based comparison
         subj_existing = extract_memory_subject(existing.content)

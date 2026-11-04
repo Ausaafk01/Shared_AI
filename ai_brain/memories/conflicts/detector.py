@@ -5,7 +5,7 @@ Conflict detection between Memory objects.
 from collections import defaultdict
 import logging
 import re
-from typing import Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from ai_brain.memories.conflicts.models import MemoryConflict
 from ai_brain.memories.conflicts.types import ConflictStatus, ConflictType
@@ -138,7 +138,8 @@ class ConflictDetector:
     - Prevents duplicate conflict records for the same disagreement.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, ml_conflict_model: Optional[Any] = None) -> None:
+        self.ml_conflict_model = ml_conflict_model
         self._tracked_conflict_signatures: Set[Tuple[str, Tuple[str, ...]]] = set()
 
     def detect_pair(self, m1: Memory, m2: Memory) -> Optional[MemoryConflict]:
@@ -179,6 +180,24 @@ class ConflictDetector:
 
         if not subj1 or subj1 != subj2:
             return None
+
+        # Rule 5b: Optional ML conflict classification when model is trained
+        if self.ml_conflict_model is not None and getattr(self.ml_conflict_model, "is_trained", False):
+            try:
+                ml_pred = self.ml_conflict_model.predict((m1, m2))
+                if not ml_pred.fallback_used and ml_pred.confidence >= 0.70:
+                    val = str(ml_pred.target_value).upper()
+                    if val != "NONE" and val in [c.value for c in ConflictType]:
+                        return self._create_conflict(
+                            m1, m2, ConflictType(val),
+                            f"ML classified conflict: {ml_pred.explanation}",
+                            confidence=ml_pred.confidence,
+                        )
+                    elif val == "NONE":
+                        # ML indicates non-conflicting compatible elaboration
+                        return None
+            except Exception:
+                pass  # Fall back to deterministic rules below
 
         # Rule 6: Check if claims are actually contradictory
         # Multiple agents independently supporting the same claim are corroboration, not a conflict

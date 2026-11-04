@@ -4,7 +4,7 @@ Brain Loop orchestrator coordinating the complete interaction lifecycle.
 
 from datetime import datetime, timezone
 import logging
-from typing import Any, Callable, Dict, List, Optional, Sequence, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 import uuid
 
 from ai_brain.context import ContextBuilder
@@ -109,6 +109,9 @@ class BrainLoop:
             self.interaction_store = SQLiteInteractionStore(":memory:")
 
         self.retrieval_engine = retrieval_engine
+        if self.retrieval_engine is not None and getattr(self.retrieval_engine, "ml_ranker", None) is None:
+            if self.ml_service is not None and getattr(self.ml_service.config, "enable_ranking_ml", False):
+                self.retrieval_engine.ml_ranker = self.ml_service.registry.get_ranking_model()
         self.context_builder = context_builder or ContextBuilder(default_max_tokens=default_token_budget or 1000)
         self.default_token_budget = default_token_budget
 
@@ -676,7 +679,56 @@ class BrainLoop:
         )
         self.interaction_store.save(completed_record)
 
+        # Automated feedback recording: record observed context utilization upon successful completion
+        if self.ml_service is not None and getattr(self.ml_service, "feedback_collector", None) is not None:
+            try:
+                if record.context_result and record.context_result.context_package:
+                    pkg = record.context_result.context_package
+                    for item in pkg.items:
+                        self.ml_service.feedback_collector.record_retrieval_feedback(
+                            project_id=validated_response.project_id,
+                            memory_id=item.memory_id,
+                            is_relevant=True,
+                            agent_id=validated_response.agent_id,
+                            session_id=validated_response.session_id,
+                            notes="Observed context utilization in completed BrainLoop interaction",
+                        )
+            except Exception as fb_err:
+                logger.debug("Automated feedback collection skipped: %s", fb_err)
+
         return completion_result
+
+    def assess_memory_staleness(self, memory: Memory, **context: Any) -> Any:
+        """Assess obsolescence risk for a memory without deleting it."""
+        if self.ml_service is not None:
+            return self.ml_service.assess_staleness(memory, **context)
+        status = getattr(memory, "status", "ACTIVE")
+        return 1.0 if status == "SUPERSEDED" else 0.0
+
+    def assess_project_staleness(self, project_id: str, **context: Any) -> List[Tuple[Memory, Any]]:
+        """Assess obsolescence risk for all active project memories without deleting any data."""
+        active_mems = self.memory_handler.get_active_memories(project_id)
+        results = []
+        for m in active_mems:
+            pred = self.assess_memory_staleness(m, **context)
+            results.append((m, pred))
+        return results
+
+    def record_feedback(self, **kwargs: Any) -> Any:
+        """Record manual human or agent feedback signal with explicit provenance."""
+        if self.ml_service is not None:
+            fb_type = kwargs.get("feedback_type")
+            if fb_type == "RETRIEVAL_RELEVANCE" or kwargs.get("is_relevant") is not None:
+                return self.ml_service.feedback_collector.record_retrieval_feedback(**kwargs)
+            elif fb_type == "DUPLICATE_DETECTION" or kwargs.get("is_duplicate") is not None:
+                return self.ml_service.feedback_collector.record_duplicate_feedback(**kwargs)
+            elif fb_type == "CONFLICT_DETECTION" or kwargs.get("is_conflict") is not None:
+                return self.ml_service.feedback_collector.record_conflict_feedback(**kwargs)
+            elif fb_type == "IMPORTANCE_PREDICTION" or kwargs.get("is_useful") is not None:
+                return self.ml_service.feedback_collector.record_importance_feedback(**kwargs)
+            elif fb_type == "STALENESS_PREDICTION" or kwargs.get("is_stale") is not None:
+                return self.ml_service.feedback_collector.record_staleness_feedback(**kwargs)
+        return None
 
     def resume_interaction(
         self,

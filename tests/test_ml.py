@@ -540,5 +540,367 @@ class TestMLServiceAndIntegration(unittest.TestCase):
         self.assertGreater(m.importance, 0.5)
 
 
+class TestMLStrengthenedEdgeCases(unittest.TestCase):
+    """
+    Dedicated test suite verifying edge cases, safety safeguards, isolation,
+    and failure handling requested in technical review.
+    """
+
+    def setUp(self) -> None:
+        self.now = datetime.now(timezone.utc)
+        self.tmp_dir = tempfile.mkdtemp()
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def test_false_positive_duplicate_detection_prevention(self) -> None:
+        """Memories on same tech subject with different actions/configs must not be classified as duplicates."""
+        dup_model = DuplicateDetectionModel()
+        m1 = Memory(
+            memory_id="m-fp-1",
+            memory_type="FACT",
+            content="Configure PostgreSQL connection pool size to 25 connections",
+            project_id="p-fp",
+            created_at=self.now,
+            updated_at=self.now,
+        )
+        m2 = Memory(
+            memory_id="m-fp-2",
+            memory_type="FACT",
+            content="Configure PostgreSQL automated WAL backup schedule for midnight",
+            project_id="p-fp",
+            created_at=self.now,
+            updated_at=self.now,
+        )
+        pred = dup_model.predict((m1, m2))
+        self.assertEqual(pred.target_value, DuplicateClassification.RELATED_DISTINCT.value)
+
+    def test_contradictory_claims_with_high_semantic_similarity(self) -> None:
+        """Contradictory claims with high lexical overlap must trigger contradiction gate, not duplicate."""
+        dup_model = DuplicateDetectionModel()
+        m1 = Memory(
+            memory_id="m-hi-sim-1",
+            memory_type="FACT",
+            content="The Redis distributed cache cluster port is configured to 6379",
+            project_id="p-sim",
+            created_at=self.now,
+            updated_at=self.now,
+        )
+        m2 = Memory(
+            memory_id="m-hi-sim-2",
+            memory_type="FACT",
+            content="The Redis distributed cache cluster port is configured to 6380",
+            project_id="p-sim",
+            created_at=self.now,
+            updated_at=self.now,
+        )
+        # Train model with contradictory pair
+        train_ex = [
+            DatasetExample(
+                example_id=f"dp-c-{i}",
+                features=dup_model.extract_pair_features(m1, m2),
+                label=0.0,
+                provenance=ExampleProvenance(ExampleSource.REAL, self.now, "p-sim", (f"dm-{i}",)),
+            )
+            for i in range(8)
+        ]
+        split = DatasetSplitter.split(train_ex, val_ratio=0.25, test_ratio=0.0, group_by_memory=False)
+        dup_model.train(split)
+
+        pred = dup_model.predict((m1, m2))
+        self.assertEqual(pred.target_value, DuplicateClassification.CONTRADICTORY.value)
+
+    def test_temporal_updates_versus_genuine_conflicts(self) -> None:
+        """Chronological migration language must be identified as TEMPORAL progression, not static contradiction."""
+        conf_model = ConflictDetectionModel()
+        m1 = Memory(
+            memory_id="m-t-1",
+            memory_type="FACT",
+            content="The project uses PostgreSQL 15 for data storage",
+            project_id="p-t",
+            created_at=self.now,
+            updated_at=self.now,
+        )
+        m2_migrated = Memory(
+            memory_id="m-t-2",
+            memory_type="FACT",
+            content="Subsequently upgraded database and migrated to PostgreSQL 16 yesterday",
+            project_id="p-t",
+            created_at=self.now + timedelta(days=5),
+            updated_at=self.now + timedelta(days=5),
+        )
+        # Train model with temporal progression example
+        train_ex = [
+            DatasetExample(
+                example_id=f"cf-t-{i}",
+                features=conf_model.extract_conflict_features(m1, m2_migrated),
+                label=ConflictType.TEMPORAL.value,
+                provenance=ExampleProvenance(ExampleSource.REAL, self.now, "p-t", (f"cm-{i}",)),
+            )
+            for i in range(8)
+        ]
+        split = DatasetSplitter.split(train_ex, val_ratio=0.25, test_ratio=0.0, group_by_memory=False)
+        conf_model.train(split)
+
+        pred = conf_model.predict((m1, m2_migrated))
+        self.assertEqual(pred.target_value, ConflictType.TEMPORAL.value)
+
+    def test_different_project_memories_strict_isolation(self) -> None:
+        """Cross-project comparisons must always yield NONE / DISTINCT with 1.0 confidence."""
+        dup_model = DuplicateDetectionModel()
+        conf_model = ConflictDetectionModel()
+
+        m_proj_a = Memory(
+            memory_id="m-pa",
+            memory_type="FACT",
+            content="The primary database is PostgreSQL",
+            project_id="proj-a",
+            created_at=self.now,
+            updated_at=self.now,
+        )
+        m_proj_b = Memory(
+            memory_id="m-pb",
+            memory_type="FACT",
+            content="The primary database is MySQL",
+            project_id="proj-b",
+            created_at=self.now,
+            updated_at=self.now,
+        )
+
+        conf_pred = conf_model.predict((m_proj_a, m_proj_b))
+        self.assertEqual(conf_pred.target_value, "NONE")
+        self.assertEqual(conf_pred.confidence, 1.0)
+
+    def test_different_agent_contexts_provenance(self) -> None:
+        """Distinct agent sources corroborate shared claims rather than conflicting."""
+        m_agent_1 = Memory(
+            memory_id="m-ag-1",
+            memory_type="FACT",
+            content="System cache is Redis",
+            project_id="p-ag",
+            created_at=self.now,
+            updated_at=self.now,
+            source_agent_ids=("agent-research",),
+        )
+        m_agent_2 = Memory(
+            memory_id="m-ag-2",
+            memory_type="FACT",
+            content="System cache is Redis",
+            project_id="p-ag",
+            created_at=self.now,
+            updated_at=self.now,
+            source_agent_ids=("agent-coding",),
+        )
+        conf_model = ConflictDetectionModel()
+        pred = conf_model.predict((m_agent_1, m_agent_2))
+        self.assertEqual(pred.target_value, "NONE")
+
+    def test_stale_but_still_valid_memories_preserved(self) -> None:
+        """Stale prediction flags high risk without altering status or deleting memory."""
+        stale_model = StalenessDetectionModel()
+        mem = Memory(
+            memory_id="m-stale-valid",
+            memory_type="FACT",
+            content="Architecture decision record from 6 months ago",
+            project_id="p-sv",
+            created_at=self.now - timedelta(days=180),
+            updated_at=self.now - timedelta(days=180),
+            status="ACTIVE",
+        )
+        pred = stale_model.predict(mem)
+        self.assertGreaterEqual(float(pred.target_value), 0.0)
+        # Memory status on original object must remain untouched
+        self.assertEqual(mem.status, "ACTIVE")
+
+    def test_untrained_model_fallback_all_five_models(self) -> None:
+        """Verify all 5 models gracefully fall back to deterministic logic when untrained."""
+        imp = MemoryImportanceModel()
+        rank = RelevanceRankingModel()
+        dup = DuplicateDetectionModel()
+        conf = ConflictDetectionModel()
+        stale = StalenessDetectionModel()
+
+        mem = Memory(
+            memory_id="m-fb",
+            memory_type="DECISION",
+            content="Use OAuth2",
+            project_id="p-fb",
+            created_at=self.now,
+            updated_at=self.now,
+            importance=0.75,
+        )
+        ret_item = RetrievalItem(
+            memory_id="m-fb",
+            root_memory_id=None,
+            version=1,
+            project_id="p-fb",
+            content="Use OAuth2",
+            memory_type="DECISION",
+            status="ACTIVE",
+            score=0.75,
+            score_breakdown=ScoreBreakdown(base_score=0.75, final_score=0.75),
+            created_at=self.now,
+        )
+
+        p_imp = imp.predict(mem)
+        self.assertTrue(p_imp.fallback_used)
+        self.assertEqual(p_imp.target_value, 0.75)
+
+        p_rank = rank.predict(ret_item)
+        self.assertTrue(p_rank.fallback_used)
+        self.assertEqual(p_rank.target_value, 0.75)
+
+        p_dup = dup.predict((mem, mem))
+        self.assertTrue(p_dup.fallback_used)
+
+        p_conf = conf.predict((mem, mem))
+        self.assertTrue(p_conf.fallback_used)
+
+        p_stale = stale.predict(mem)
+        self.assertTrue(p_stale.fallback_used)
+
+    def test_low_confidence_prediction_fallback(self) -> None:
+        """MLService falls back to baseline when prediction confidence is below threshold."""
+        cfg = MLConfiguration(min_confidence_threshold=0.99)
+        svc = MLService(config=cfg)
+
+        mem = Memory(
+            memory_id="m-low",
+            memory_type="FACT",
+            content="Plain fact",
+            project_id="p-low",
+            created_at=self.now,
+            updated_at=self.now,
+            importance=0.55,
+        )
+        pred = svc.predict_importance(mem)
+        self.assertTrue(pred.fallback_used)
+        self.assertEqual(pred.target_value, 0.55)
+
+    def test_model_loading_failures_and_missing_files(self) -> None:
+        """Loading a non-existent model file raises FileNotFoundError cleanly."""
+        with self.assertRaises(FileNotFoundError):
+            MemoryImportanceModel.load("non_existent_model_file.json")
+
+    def test_ml_disabled_independently_for_each_component(self) -> None:
+        """Each component flag in MLConfiguration independently gates that component."""
+        cfg = MLConfiguration(
+            enable_importance_ml=False,
+            enable_ranking_ml=True,
+            enable_duplicate_ml=False,
+            enable_conflict_ml=True,
+            enable_staleness_ml=False,
+        )
+        svc = MLService(config=cfg)
+
+        mem = Memory(
+            memory_id="m-gate",
+            memory_type="FACT",
+            content="Gate test",
+            project_id="p-gate",
+            created_at=self.now,
+            updated_at=self.now,
+            importance=0.6,
+        )
+        p_imp = svc.predict_importance(mem)
+        self.assertTrue(p_imp.fallback_used)
+        self.assertIn("disabled", p_imp.explanation)
+
+        p_dup = svc.check_duplicate(mem, mem)
+        self.assertTrue(p_dup.fallback_used)
+        self.assertIn("Deterministic comparator", p_dup.explanation)
+
+        p_stale = svc.assess_staleness(mem)
+        self.assertTrue(p_stale.fallback_used)
+        self.assertIn("disabled", p_stale.explanation)
+
+    def test_feedback_persistence_and_provenance_roundtrip(self) -> None:
+        """Feedback recorded in SQLite store persists completely across store reload."""
+        db_file = os.path.join(self.tmp_dir, "feedback_test.sqlite")
+        store = SQLiteFeedbackStore(db_file)
+        collector = FeedbackCollector(store)
+
+        rec = collector.record_retrieval_feedback(
+            project_id="p-fb-rt",
+            memory_id="mem-rt-1",
+            is_relevant=True,
+            model_name="RelevanceRankingModel",
+            model_version="v1.2.3",
+            agent_id="agent-eval",
+            session_id="sess-rt",
+            notes="Audit signal verified",
+        )
+        store.close()
+
+        # Reopen store from disk
+        store2 = SQLiteFeedbackStore(db_file)
+        records = store2.list_feedback(project_id="p-fb-rt")
+        self.assertEqual(len(records), 1)
+        loaded = records[0]
+        self.assertEqual(loaded.feedback_id, rec.feedback_id)
+        self.assertEqual(loaded.signal, FeedbackSignal.POSITIVE)
+        self.assertEqual(loaded.model_name, "RelevanceRankingModel")
+        self.assertEqual(loaded.model_version, "v1.2.3")
+        self.assertEqual(loaded.agent_id, "agent-eval")
+        self.assertEqual(loaded.session_id, "sess-rt")
+        store2.close()
+
+    def test_training_test_leakage_detection(self) -> None:
+        """Validator rejects splits with memory ID leakage."""
+        prov = ExampleProvenance(
+            source_type=ExampleSource.REAL,
+            created_at=self.now,
+            source_memory_ids=("shared-root-mem",),
+        )
+        ex1 = DatasetExample(example_id="id-1", features={"f": 1.0}, label=1.0, provenance=prov)
+        ex2 = DatasetExample(example_id="id-2", features={"f": 1.0}, label=0.0, provenance=prov)
+
+        split = DatasetSplit(
+            name="leak-test",
+            train_examples=(ex1,),
+            validation_examples=(ex2,),
+            feature_names=("f",),
+        )
+        with self.assertRaises(DatasetValidationError):
+            DatasetValidator.validate_split(split)
+
+    def test_brain_loop_automated_feedback_collection(self) -> None:
+        """BrainLoop automatically logs retrieval usage feedback upon completed interaction."""
+        ev_store = SQLiteEventStore(":memory:")
+        fb_store = SQLiteFeedbackStore(":memory:")
+        collector = FeedbackCollector(fb_store)
+        svc = MLService(feedback_collector=collector)
+
+        loop = BrainLoop(event_store=ev_store, ml_service=svc)
+
+        from ai_brain.loop.models import AgentInteractionInput, AgentResponseInput
+        inp = AgentInteractionInput(
+            project_id="p-auto-fb",
+            agent_id="agent-1",
+            session_id="sess-auto",
+            content="Initial inquiry",
+        )
+        ctx = loop.prepare_context(inp)
+        resp = AgentResponseInput(
+            project_id="p-auto-fb",
+            agent_id="agent-1",
+            session_id="sess-auto",
+            interaction_id=ctx.interaction_id,
+            content="The system adopts PostgreSQL 16.",
+        )
+        res = loop.complete_interaction(resp)
+        self.assertEqual(res.status.value, "COMPLETED")
+
+        # Now test manual feedback via loop
+        loop.record_feedback(
+            project_id="p-auto-fb",
+            memory_id="mem-manual",
+            is_relevant=True,
+            notes="Manual rating",
+        )
+        all_fb = fb_store.list_feedback(project_id="p-auto-fb")
+        self.assertGreaterEqual(len(all_fb), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

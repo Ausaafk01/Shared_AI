@@ -17,14 +17,25 @@ from ai_brain.ml.datasets.schemas import DatasetSplit
 from ai_brain.ml.exceptions import ModelNotTrainedError
 
 
+CONFLICT_CLASSES: Tuple[str, ...] = (
+    ConflictType.FACTUAL.value,
+    ConflictType.TECHNICAL.value,
+    ConflictType.TEMPORAL.value,
+    ConflictType.DECISION.value,
+    ConflictType.SOURCE.value,
+    "NONE",
+)
+
+
 class ConflictDetectionModel(BaseMLModel):
     """
-    ML model for detecting nuanced conflicts and distinguishing them from updates or compatible details.
+    Supervised Multi-Class ML model for detecting nuanced conflicts and classifying conflict types.
     
     Guarantees:
+    - Learns distinct feature weight vectors per conflict type via One-vs-Rest regularized logistic regression.
     - Distinguishes genuine contradictions from chronological updates, differing detail levels, and compatible views.
     - Never automatically resolves or discards disputed memories.
-    - Preserves evidence and provides transparent conflict type classification.
+    - Preserves evidence and provides transparent conflict type classification with calibrated probabilities.
     - Falls back to deterministic ConflictDetector when untrained.
     """
 
@@ -40,8 +51,19 @@ class ConflictDetectionModel(BaseMLModel):
         "time_gap_days",
     )
 
-    def __init__(self, metadata: Optional[ModelMetadata] = None, weights: Optional[Dict[str, float]] = None, bias: float = 0.0) -> None:
+    def __init__(
+        self,
+        metadata: Optional[ModelMetadata] = None,
+        class_weights: Optional[Dict[str, Dict[str, float]]] = None,
+        class_biases: Optional[Dict[str, float]] = None,
+        weights: Optional[Dict[str, float]] = None,
+        bias: float = 0.0,
+    ) -> None:
         super().__init__(metadata)
+        self.class_weights: Dict[str, Dict[str, float]] = class_weights or {
+            c: {f: 0.0 for f in self.FEATURE_NAMES} for c in CONFLICT_CLASSES
+        }
+        self.class_biases: Dict[str, float] = class_biases or {c: 0.0 for c in CONFLICT_CLASSES}
         self.weights = weights or {f: 0.0 for f in self.FEATURE_NAMES}
         self.bias = bias
         self.deterministic_detector = ConflictDetector()
@@ -165,103 +187,150 @@ class ConflictDetectionModel(BaseMLModel):
 
         feats = self.extract_conflict_features(m1, m2)
 
-        # Filter out differing detail levels and non-conflicting elaborations
-        if feats["detail_level_difference"] > 0.0 and feats["has_port_or_numeric_mismatch"] == 0.0:
-            return ModelPrediction(
-                target_value="NONE",
-                confidence=0.88,
-                feature_contributions=MappingProxyType(feats),
-                model_version=self.metadata.version if self.metadata else "v1.0",
-                fallback_used=False,
-                explanation="Non-conflicting elaboration: texts represent different detail levels of the same fact",
-            )
+        # 2. Compute OvR logits for all conflict classes using learned parameters
+        logits: Dict[str, float] = {}
+        for c in CONFLICT_CLASSES:
+            w_c = self.class_weights.get(c, {})
+            b_c = self.class_biases.get(c, 0.0)
+            logits[c] = b_c + sum(w_c.get(f, 0.0) * feats.get(f, 0.0) for f in self.FEATURE_NAMES)
 
-        # Provenance / Source conflict
-        if feats["has_provenance_dispute_markers"] > 0.0:
-            return ModelPrediction(
-                target_value=ConflictType.SOURCE.value,
-                confidence=0.92,
-                feature_contributions=MappingProxyType(feats),
-                model_version=self.metadata.version if self.metadata else "v1.0",
-                fallback_used=False,
-                explanation="Disagreement concerning source credibility, attribution, or authenticity",
-            )
+        # Convert logits to normalized probabilities via softmax
+        max_logit = max(logits.values())
+        exp_vals = {c: math.exp(max(-15.0, min(15.0, l - max_logit))) for c, l in logits.items()}
+        sum_exp = sum(exp_vals.values()) or 1.0
+        probs = {c: exp_vals[c] / sum_exp for c in CONFLICT_CLASSES}
 
-        # Temporal migration / progression
-        if feats["has_temporal_progression_language"] > 0.0 and feats["time_gap_days"] > 0.0:
-            return ModelPrediction(
-                target_value=ConflictType.TEMPORAL.value,
-                confidence=0.89,
-                feature_contributions=MappingProxyType(feats),
-                model_version=self.metadata.version if self.metadata else "v1.0",
-                fallback_used=False,
-                explanation="Temporal progression: claims reflect migration or chronological update",
-            )
+        # Argmax class
+        predicted_class = max(probs.keys(), key=lambda c: probs[c])
+        confidence = probs[predicted_class]
 
-        # Technical configuration conflict
-        if feats["has_port_or_numeric_mismatch"] > 0.0:
-            return ModelPrediction(
-                target_value=ConflictType.TECHNICAL.value,
-                confidence=0.95,
-                feature_contributions=MappingProxyType(feats),
-                model_version=self.metadata.version if self.metadata else "v1.0",
-                fallback_used=False,
-                explanation="Discrepant numeric or port configurations on the same component",
-            )
+        # Feature contributions for predicted class
+        winning_weights = self.class_weights.get(predicted_class, {})
+        contributions = {
+            f: round(winning_weights.get(f, 0.0) * feats.get(f, 0.0), 4)
+            for f in self.FEATURE_NAMES
+        }
 
-        # Decision conflict
-        if feats["is_decision_type"] > 0.0 and (feats["has_exclusive"] if "has_exclusive" in feats else feats["has_mutually_exclusive_entities"] > 0.0):
-            return ModelPrediction(
-                target_value=ConflictType.DECISION.value,
-                confidence=0.90,
-                feature_contributions=MappingProxyType(feats),
-                model_version=self.metadata.version if self.metadata else "v1.0",
-                fallback_used=False,
-                explanation="Conflicting decisions recorded for the same architectural subject",
-            )
-
-        # Factual conflict
-        if feats["same_subject"] > 0.0 and (feats["has_mutually_exclusive_entities"] > 0.0 or feats["has_negation_contradiction"] > 0.0):
-            return ModelPrediction(
-                target_value=ConflictType.FACTUAL.value,
-                confidence=0.91,
-                feature_contributions=MappingProxyType(feats),
-                model_version=self.metadata.version if self.metadata else "v1.0",
-                fallback_used=False,
-                explanation="Direct factual contradiction between mutually exclusive claims",
-            )
-
-        return ModelPrediction(
-            target_value="NONE",
-            confidence=0.85,
-            feature_contributions=MappingProxyType(feats),
-            model_version=self.metadata.version if self.metadata else "v1.0",
-            fallback_used=False,
-            explanation="Compatible claims with no contradiction detected",
+        explanation = (
+            f"Supervised multiclass model predicts {predicted_class} (prob={confidence:.3f}, "
+            f"features active: {[f for f, v in contributions.items() if v != 0]})"
         )
 
-    def train(self, dataset: DatasetSplit, **kwargs: Any) -> Dict[str, float]:
+        return ModelPrediction(
+            target_value=predicted_class,
+            confidence=round(confidence, 4),
+            probabilities=MappingProxyType({c: round(p, 4) for c, p in probs.items()}),
+            feature_contributions=MappingProxyType(contributions),
+            model_version=self.metadata.version if self.metadata else "v1.0",
+            fallback_used=False,
+            explanation=explanation,
+        )
+
+    def train(
+        self,
+        dataset: DatasetSplit,
+        *,
+        learning_rate: float = 0.05,
+        epochs: int = 60,
+        l2_reg: float = 0.01,
+        **kwargs: Any,
+    ) -> Dict[str, float]:
         train_examples = dataset.train_examples
         if not train_examples:
             raise ModelNotTrainedError("Cannot train with empty dataset split")
 
+        from ai_brain.ml.training.evaluator import ModelEvaluator
+
+        # Initialize priors per class
+        class_weights: Dict[str, Dict[str, float]] = {
+            c: {f: 0.0 for f in self.FEATURE_NAMES} for c in CONFLICT_CLASSES
+        }
+        class_biases: Dict[str, float] = {c: 0.0 for c in CONFLICT_CLASSES}
+
+        # Initialize sensible domain priors for One-vs-Rest classifiers
+        class_weights[ConflictType.TECHNICAL.value]["has_port_or_numeric_mismatch"] = 3.5
+        class_weights[ConflictType.TEMPORAL.value]["has_temporal_progression_language"] = 3.0
+        class_weights[ConflictType.SOURCE.value]["has_provenance_dispute_markers"] = 3.5
+        class_weights[ConflictType.DECISION.value]["is_decision_type"] = 2.0
+        class_weights[ConflictType.DECISION.value]["has_mutually_exclusive_entities"] = 2.0
+        class_weights[ConflictType.FACTUAL.value]["same_subject"] = 1.5
+        class_weights[ConflictType.FACTUAL.value]["has_mutually_exclusive_entities"] = 2.5
+        class_weights["NONE"]["detail_level_difference"] = 3.0
+
+        n = len(train_examples)
+
+        # Train each OvR binary classifier
+        for c in CONFLICT_CLASSES:
+            w_c = class_weights[c]
+            b_c = class_biases[c]
+
+            for _ in range(epochs):
+                grad_w = {f: 0.0 for f in self.FEATURE_NAMES}
+                grad_b = 0.0
+
+                for ex in train_examples:
+                    # Positive label if example target matches class c
+                    ex_label = str(ex.label).upper()
+                    y = 1.0 if (ex_label == c or (c == "NONE" and ex_label in ("NONE", "FALSE", "0", 0))) else 0.0
+                    logit = b_c + sum(w_c[f] * ex.features.get(f, 0.0) for f in self.FEATURE_NAMES)
+                    p = 1.0 / (1.0 + math.exp(-max(-15.0, min(15.0, logit))))
+                    err = p - y
+
+                    grad_b += err
+                    for f in self.FEATURE_NAMES:
+                        grad_w[f] += err * ex.features.get(f, 0.0)
+
+                b_c -= learning_rate * (grad_b / n)
+                for f in self.FEATURE_NAMES:
+                    w_c[f] -= learning_rate * ((grad_w[f] / n) + (l2_reg * w_c[f]))
+
+            class_weights[c] = w_c
+            class_biases[c] = b_c
+
+        self.class_weights = class_weights
+        self.class_biases = class_biases
         self._is_trained = True
+
+        # Validation evaluation
+        val_true, val_pred = [], []
+        for ex in dataset.validation_examples:
+            ex_lbl = str(ex.label).upper()
+            if ex_lbl in ("NONE", "FALSE", "0", "0.0"):
+                target_str = "NONE"
+            else:
+                target_str = ex_lbl
+
+            logits_v = {
+                c: class_biases[c] + sum(class_weights[c][f] * ex.features.get(f, 0.0) for f in self.FEATURE_NAMES)
+                for c in CONFLICT_CLASSES
+            }
+            pred_c = max(logits_v.keys(), key=lambda c: logits_v[c])
+            val_true.append(target_str if target_str in CONFLICT_CLASSES else "NONE")
+            val_pred.append(pred_c)
+
+        eval_obj = ModelEvaluator.evaluate_multiclass_classification(
+            val_true, val_pred, classes=CONFLICT_CLASSES
+        )
+        metrics = eval_obj.to_dict()
+
         self.metadata = ModelMetadata(
             model_name="ConflictDetectionModel",
             model_type=ModelType.CONFLICT,
             version="1.0.0",
             created_at=datetime.now(timezone.utc),
             feature_names=self.FEATURE_NAMES,
-            parameters=MappingProxyType({"sensitivity": 0.85}),
-            metrics=MappingProxyType({"f1_score": 0.93}),
+            parameters=MappingProxyType({"classes": list(CONFLICT_CLASSES)}),
+            metrics=MappingProxyType({"macro_f1": eval_obj.macro_f1, "accuracy": eval_obj.accuracy}),
             training_data_provenance=dataset.name,
-            description="Calibrated multi-type contradiction and progression classifier",
+            description="Supervised multiclass One-vs-Rest regularized logistic conflict classifier",
         )
-        return {"f1_score": 0.93}
+        return {"accuracy": eval_obj.accuracy, "macro_f1": eval_obj.macro_f1}
 
     def save(self, filepath: str) -> None:
         data = {
             "metadata": self.metadata.to_dict() if self.metadata else None,
+            "class_weights": self.class_weights,
+            "class_biases": self.class_biases,
             "weights": self.weights,
             "bias": self.bias,
         }
@@ -273,4 +342,10 @@ class ConflictDetectionModel(BaseMLModel):
         with open(filepath, "r", encoding="utf-8") as f:
             data = json.load(f)
         meta = ModelMetadata.from_dict(data["metadata"]) if data.get("metadata") else None
-        return cls(metadata=meta, weights=data.get("weights"), bias=float(data.get("bias", 0.0)))
+        return cls(
+            metadata=meta,
+            class_weights=data.get("class_weights"),
+            class_biases=data.get("class_biases"),
+            weights=data.get("weights"),
+            bias=float(data.get("bias", 0.0)),
+        )

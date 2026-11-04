@@ -32,6 +32,30 @@ class ClassificationMetrics:
 
 
 @dataclass(frozen=True)
+class MulticlassClassificationMetrics:
+    accuracy: float
+    macro_precision: float
+    macro_recall: float
+    macro_f1: float
+    per_class_metrics: Dict[str, Dict[str, float]]
+    confusion_matrix: Dict[str, Dict[str, int]]
+    total_samples: int
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "accuracy": round(self.accuracy, 4),
+            "macro_precision": round(self.macro_precision, 4),
+            "macro_recall": round(self.macro_recall, 4),
+            "macro_f1": round(self.macro_f1, 4),
+            "per_class_metrics": {
+                c: {k: round(v, 4) for k, v in m.items()} for c, m in self.per_class_metrics.items()
+            },
+            "confusion_matrix": self.confusion_matrix,
+            "total_samples": self.total_samples,
+        }
+
+
+@dataclass(frozen=True)
 class RankingMetrics:
     ndcg_at_5: float
     ndcg_at_10: float
@@ -132,6 +156,60 @@ class ModelEvaluator:
             false_positive_rate=fpr,
             false_negative_rate=fnr,
             brier_score=brier,
+            total_samples=n,
+        )
+
+    @staticmethod
+    def evaluate_multiclass_classification(
+        y_true: Sequence[str],
+        y_pred: Sequence[str],
+        classes: Sequence[str],
+    ) -> MulticlassClassificationMetrics:
+        if len(y_true) != len(y_pred):
+            raise ValueError("y_true and y_pred must have identical length")
+        n = len(y_true)
+        if n == 0:
+            return MulticlassClassificationMetrics(0.0, 0.0, 0.0, 0.0, {}, {}, 0)
+
+        # Build confusion matrix: actual -> predicted -> count
+        matrix: Dict[str, Dict[str, int]] = {c1: {c2: 0 for c2 in classes} for c1 in classes}
+        for yt, yp in zip(y_true, y_pred):
+            if yt in matrix and yp in matrix[yt]:
+                matrix[yt][yp] += 1
+
+        correct = sum(1 for yt, yp in zip(y_true, y_pred) if yt == yp)
+        accuracy = correct / n
+
+        per_class: Dict[str, Dict[str, float]] = {}
+        precisions, recalls, f1s = [], [], []
+
+        for c in classes:
+            tp = matrix[c][c]
+            fp = sum(matrix[other][c] for other in classes if other != c)
+            fn = sum(matrix[c][other] for other in classes if other != c)
+            support = sum(matrix[c].values())
+
+            p = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+            r = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+            f1 = (2 * p * r) / (p + r) if (p + r) > 0 else 0.0
+
+            per_class[c] = {"precision": p, "recall": r, "f1_score": f1, "support": float(support)}
+            if support > 0:
+                precisions.append(p)
+                recalls.append(r)
+                f1s.append(f1)
+
+        macro_p = sum(precisions) / len(precisions) if precisions else 0.0
+        macro_r = sum(recalls) / len(recalls) if recalls else 0.0
+        macro_f1 = sum(f1s) / len(f1s) if f1s else 0.0
+
+        return MulticlassClassificationMetrics(
+            accuracy=accuracy,
+            macro_precision=macro_p,
+            macro_recall=macro_r,
+            macro_f1=macro_f1,
+            per_class_metrics=per_class,
+            confusion_matrix=matrix,
             total_samples=n,
         )
 

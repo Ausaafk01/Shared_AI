@@ -211,14 +211,34 @@ class RelevanceRankingModel(BaseMLModel):
         self.bias = bias
         self._is_trained = True
 
+        from ai_brain.ml.training.evaluator import ModelEvaluator
+
         val_errors = []
+        val_ranked_lists: List[List[float]] = []
+        curr_query_rels: List[Tuple[float, float]] = [] # (predicted_score, ground_truth)
+
         for ex in dataset.validation_examples:
             y = float(ex.label)
             logit = bias + sum(weights[f] * ex.features.get(f, 0.0) for f in self.FEATURE_NAMES)
             p = 1.0 / (1.0 + math.exp(-max(-15.0, min(15.0, logit))))
             val_errors.append(abs(p - y))
+            curr_query_rels.append((p, y))
 
+        # Sort by predicted score descending to evaluate ranking quality
+        curr_query_rels.sort(key=lambda x: -x[0])
+        ranked_rels = [gt for _, gt in curr_query_rels]
+        if ranked_rels:
+            val_ranked_lists.append(ranked_rels)
+
+        ranking_metrics = ModelEvaluator.evaluate_ranking(val_ranked_lists)
         mae = sum(val_errors) / len(val_errors) if val_errors else 0.0
+
+        metrics = {
+            "mae": round(mae, 4),
+            "ndcg_at_5": round(ranking_metrics.ndcg_at_5, 4),
+            "ndcg_at_10": round(ranking_metrics.ndcg_at_10, 4),
+            "mrr": round(ranking_metrics.mrr, 4),
+        }
 
         self.metadata = ModelMetadata(
             model_name="RelevanceRankingModel",
@@ -227,11 +247,11 @@ class RelevanceRankingModel(BaseMLModel):
             created_at=datetime.now(timezone.utc),
             feature_names=self.FEATURE_NAMES,
             parameters=MappingProxyType({"weights": self.weights, "bias": self.bias}),
-            metrics=MappingProxyType({"validation_mae": mae}),
+            metrics=MappingProxyType(metrics),
             training_data_provenance=dataset.name,
-            description="Calibrated multi-stream relevance ranking model",
+            description="Calibrated multi-stream relevance ranking and scoring model",
         )
-        return {"mae": mae}
+        return metrics
 
     def save(self, filepath: str) -> None:
         data = {

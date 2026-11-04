@@ -792,7 +792,7 @@ print(f"Claude Output: {claude_res.content}")
 
 ## Running Automated Tests
 
-Run all 288 automated tests across the Event System, Memory Model, Memory Extraction, Memory Updating, Conflict Management, Knowledge Graph, Vector Memory, Retrieval Engine, Context Builder, Brain Loop, and Multi-Agent System:
+Run all 316 automated tests across the Event System, Memory Model, Memory Extraction, Memory Updating, Conflict Management, Knowledge Graph, Vector Memory, Retrieval Engine, Context Builder, Brain Loop, Multi-Agent System, and Machine Learning Layer:
 
 ```bash
 python -m unittest discover -s tests -v
@@ -864,4 +864,4 @@ python examples/ml_demo.py
 - [x] **Feedback Collection System**: SQLite-backed `FeedbackCollector` recording retrieval, duplicate, conflict, importance, and staleness signals with controlled batch preparation (no auto-retraining).
 - [x] **Model Evaluation & Comparative Baselines**: Precision, recall, F1, accuracy, Brier score, NDCG, MRR, and MAE comparing ML against deterministic baselines.
 - [x] **Brain Loop & Retrieval Integration**: Clean integration into `RetrievalEngine` re-ranking, `LoopMemoryHandler` importance enrichment, and `BrainLoop` feedback recording.
-- [x] **Preserved Phase 1 & Phase 2 Baseline**: All 288 existing tests preserved + 15 new ML tests = 303 tests (299 passing, 4 live skipped). All 7 demos passing.
+- [x] **Preserved Phase 1 & Phase 2 Baseline**: All 288 existing tests preserved + 28 ML tests = 316 tests (312 passing, 4 live skipped). All 7 demos passing.

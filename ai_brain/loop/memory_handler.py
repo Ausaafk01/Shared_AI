@@ -79,13 +79,28 @@ class LoopMemoryHandler:
         vector_manager: Optional[VectorMemoryManager] = None,
         ml_service: Optional[Any] = None,
     ) -> None:
+        self.ml_service = ml_service
         self.memory_extractor = memory_extractor or MemoryExtractor()
-        self.memory_updater = memory_updater or MemoryUpdater()
-        self.conflict_detector = conflict_detector or ConflictDetector()
+
+        if memory_updater is not None:
+            self.memory_updater = memory_updater
+        elif ml_service is not None and getattr(ml_service.config, "enable_duplicate_ml", False):
+            from ai_brain.memories.updating.comparison import MemoryComparator
+            comp = MemoryComparator(ml_duplicate_model=ml_service.registry.get_duplicate_model())
+            self.memory_updater = MemoryUpdater(comparator=comp)
+        else:
+            self.memory_updater = MemoryUpdater()
+
+        if conflict_detector is not None:
+            self.conflict_detector = conflict_detector
+        elif ml_service is not None and getattr(ml_service.config, "enable_conflict_ml", False):
+            self.conflict_detector = ConflictDetector(ml_conflict_model=ml_service.registry.get_conflict_model())
+        else:
+            self.conflict_detector = ConflictDetector()
+
         self.conflict_manager = conflict_manager or ConflictManager(updater=self.memory_updater)
         self.graph_integrator = graph_integrator
         self.vector_manager = vector_manager
-        self.ml_service = ml_service
 
         # In-memory index of current active memories per project
         # project_id -> {memory_id: Memory}

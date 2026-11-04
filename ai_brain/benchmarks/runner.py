@@ -219,11 +219,20 @@ class BenchmarkRunner:
         constraints_violated = len(scenario.expected_constraints) - constraints_adhered
         constraints_adherence_rate = (constraints_adhered / len(scenario.expected_constraints)) if scenario.expected_constraints else 1.0
 
-        partial_score = (
+        conflict_detected = False
+        conflict_handled = False if scenario.conflict_ground_truth == ConflictGroundTruth.GENUINE_CONTRADICTION else True
+
+        base_partial = (
             0.35 * facts_recovery_rate +
             0.35 * decisions_maintenance_rate +
             0.30 * constraints_adherence_rate
         )
+        if not scenario.expected_facts and not scenario.expected_decisions and not scenario.expected_constraints:
+            partial_score = 1.0 if conflict_handled else 0.0
+        elif scenario.conflict_ground_truth == ConflictGroundTruth.GENUINE_CONTRADICTION:
+            partial_score = 0.6 * base_partial + 0.4 * (1.0 if conflict_handled else 0.0)
+        else:
+            partial_score = base_partial
 
         missing_notes = []
         for f in scenario.expected_facts:
@@ -237,9 +246,6 @@ class BenchmarkRunner:
                 missing_notes.append(f"Violated technical constraint: {c}")
 
         repeated_explanations = facts_missed + (len(scenario.expected_decisions) - decisions_maintained) + constraints_violated
-
-        conflict_detected = False
-        conflict_handled = False if scenario.conflict_ground_truth == ConflictGroundTruth.GENUINE_CONTRADICTION else True
 
         task_success = (
             facts_recovered == len(scenario.expected_facts)
@@ -407,13 +413,17 @@ class BenchmarkRunner:
         constraints_violated = len(scenario.expected_constraints) - constraints_adhered
         constraints_adherence_rate = (constraints_adhered / len(scenario.expected_constraints)) if scenario.expected_constraints else 1.0
 
-        partial_score = (
+        base_partial = (
             0.35 * facts_recovery_rate +
             0.35 * decisions_maintenance_rate +
             0.30 * constraints_adherence_rate
         )
-        if stale_leak_in_raw:
-            partial_score = max(0.0, partial_score * 0.5)
+        if not scenario.expected_facts and not scenario.expected_decisions and not scenario.expected_constraints:
+            partial_score = 1.0 if conflict_handled else 0.0
+        elif scenario.conflict_ground_truth == ConflictGroundTruth.GENUINE_CONTRADICTION:
+            partial_score = 0.6 * base_partial + 0.4 * (1.0 if conflict_handled else 0.0)
+        else:
+            partial_score = base_partial * (0.5 if stale_leak_in_raw else 1.0)
 
         missing_notes = []
         for f in scenario.expected_facts:
@@ -775,12 +785,6 @@ class BenchmarkRunner:
         constraints_violated = len(scenario.expected_constraints) - constraints_adhered
         constraints_adherence_rate = (constraints_adhered / len(scenario.expected_constraints)) if scenario.expected_constraints else 1.0
 
-        partial_score = (
-            0.35 * facts_recovery_rate +
-            0.35 * decisions_maintenance_rate +
-            0.30 * constraints_adherence_rate
-        )
-
         missing_notes = []
         for f in scenario.expected_facts:
             if f.lower() not in combined_text:
@@ -802,6 +806,18 @@ class BenchmarkRunner:
             conflict_handled = not conflict_detected
 
         stale_used = sum(1 for item in retrieved_items if item.status == "SUPERSEDED")
+
+        base_partial = (
+            0.35 * facts_recovery_rate +
+            0.35 * decisions_maintenance_rate +
+            0.30 * constraints_adherence_rate
+        )
+        if not scenario.expected_facts and not scenario.expected_decisions and not scenario.expected_constraints:
+            partial_score = 1.0 if conflict_handled else 0.0
+        elif scenario.conflict_ground_truth == ConflictGroundTruth.GENUINE_CONTRADICTION:
+            partial_score = 0.6 * base_partial + 0.4 * (1.0 if conflict_handled else 0.0)
+        else:
+            partial_score = base_partial * (0.5 if stale_used > 0 else 1.0)
 
         # Retrieval accuracy classification
         retrieved_ids = tuple(item.memory_id for item in retrieved_items)

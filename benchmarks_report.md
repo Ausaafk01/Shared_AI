@@ -1,6 +1,6 @@
 # AI Brain — Phase 4 System Benchmarking & Comparative Evaluation Report
 
-**Generated**: 2026-11-04 18:18:37 UTC
+**Generated**: 2026-11-04 19:38:25 UTC
 
 **Total Scenarios Evaluated**: 30 realistic multi-session test scenarios (3 per category across 10 categories)
 
@@ -33,7 +33,7 @@ To isolate the causal value of persistent memory architectures from raw context 
 | Metric | Condition A (Cold Start) | Condition B (Raw History) | Condition C (AI Brain) | Brain vs Cold (Delta) | Brain vs Raw (Delta) |
 |---|---:|---:|---:|---:|---:|
 | **Task Success (Strict Binary)** | 0.0% | 83.3% | 70.0% | **++70.0%** | **+-13.3%** |
-| **Partial Credit Score (0.0 to 1.0)** | 0.133 | 0.932 | 0.917 | **++0.783** | **+-0.016** |
+| **Partial Credit Score (0.0 to 1.0)** | 0.067 | 0.866 | 0.883 | **++0.817** | **++0.017** |
 | **Repeated Explanations Needed** | 105 facts | 3 facts | 11 facts | **-94 avoided** | **--8 avoided** |
 | **Average Total Tokens / Query** | 65.9 est. tok | 274.1 est. tok | 437.8 est. tok | ++371.8 (++564.0%) | +163.7 (+59.7%) |
 | **Conflict Detection (TP / FP)** | 0 / 0 (Unaware) | 0 / 0 (Unaware) | 1 TP / 0 FP | 100% Precision | 100% Precision |
@@ -87,7 +87,7 @@ While the suite contains 30 scenarios, they are organized into **10 distinct sce
 | Clustered Metric | Mean Diff (C - A) | Cluster Std Error | 95% Confidence Interval | t-Statistic | Significant (p<0.05) |
 |---|---:|---:|:---:|---:|:---:|
 | **Task Continuation Success (Cluster-Stratified, df=9)** | +0.700 | 0.105 | [0.46, 0.94] | 6.68 | Yes |
-| **Partial Credit Score (Cluster-Stratified, df=9)** | +0.783 | 0.111 | [0.53, 1.03] | 7.05 | Yes |
+| **Partial Credit Score (Cluster-Stratified, df=9)** | +0.817 | 0.090 | [0.61, 1.02] | 9.08 | Yes |
 | **Total Tokens Consumed (Cluster-Stratified, df=9)** | +371.833 | 101.170 | [142.99, 600.68] | 3.68 | Yes |
 
 ### Category-Level Detailed Breakdown (10 Clusters)
@@ -98,7 +98,7 @@ While the suite contains 30 scenarios, they are organized into **10 distinct sce
 | **`ARCHITECTURAL_DECISION`** | 3 | 0.0% (0/3) | 100.0% (3/3) | **100.0% (3/3)** | 0.00 | 1.00 | **1.00** | 69 / 231 / 430 |
 | **`TECHNICAL_CONSTRAINTS`** | 3 | 0.0% (0/3) | 100.0% (3/3) | **66.7% (2/3)** | 0.00 | 1.00 | **0.97** | 70 / 214 / 420 |
 | **`UPDATED_REQUIREMENTS`** | 3 | 0.0% (0/3) | 66.7% (2/3) | **100.0% (3/3)** | 0.00 | 0.78 | **1.00** | 75 / 220 / 285 |
-| **`CONTRADICTORY_CLAIMS`** | 3 | 0.0% (0/3) | 33.3% (1/3) | **33.3% (1/3)** | 0.88 | 1.00 | **0.94** | 67 / 159 / 306 |
+| **`CONTRADICTORY_CLAIMS`** | 3 | 0.0% (0/3) | 33.3% (1/3) | **33.3% (1/3)** | 0.22 | 0.33 | **0.61** | 67 / 159 / 306 |
 | **`AGENT_SWITCHING`** | 3 | 0.0% (0/3) | 100.0% (3/3) | **66.7% (2/3)** | 0.00 | 1.00 | **0.88** | 68 / 259 / 354 |
 | **`SESSION_INTERRUPTION`** | 3 | 0.0% (0/3) | 100.0% (3/3) | **0.0% (0/3)** | 0.45 | 1.00 | **0.65** | 55 / 183 / 212 |
 | **`REPEATED_EXPLANATION`** | 3 | 0.0% (0/3) | 100.0% (3/3) | **100.0% (3/3)** | 0.00 | 1.00 | **1.00** | 70 / 192 / 358 |
@@ -154,7 +154,7 @@ All four retrieval strategies were evaluated on the identical query set across a
 | **Vector (Cosine)** | 0.641 | 0.767 | 0.676 | 0.560 | 0.800 | 0.659 | 0.717 | 0.729 | 0.259 |
 | **Knowledge Graph (Traversal)** | 0.589 | 0.633 | 0.604 | 0.767 | 0.657 | 0.708 | 0.633 | 0.631 | 0.178 |
 | **Hybrid (RRF Fusion)** | 0.661 | 0.767 | 0.698 | 0.519 | 0.800 | 0.629 | 0.700 | 0.717 | 0.306 |
-| **ML-Enhanced (Reranked)** | 0.674 | 0.833 | 0.720 | 0.556 | 0.857 | 0.674 | 0.740 | 0.763 | 0.292 |
+| **ML-Enhanced (Reranked)** | 0.668 | 0.800 | 0.709 | 0.537 | 0.829 | 0.652 | 0.733 | 0.750 | 0.299 |
 
 > [!NOTE]
 > **Interpretation of Retrieval Results**:
@@ -175,8 +175,8 @@ Every scenario was audited and explicitly labeled according to ground truth:
 | **Actual Consistent / Compatible / Updated** | **0 (False Positive)** | **28 (True Negative)** | 28 |
 | **Total** | 2 | 28 | **30** |
 
-- **Conflict Precision**: **100.0%** (Zero false alarms on compatible claims or updates).
-- **Conflict Recall**: **50.0%** (Both genuine contradictions correctly flagged with dispute warnings).
+- **Conflict Precision**: **100.0%** (Zero false alarms on compatible claims or updates; by documented convention, precision is 0.0 when zero positive predictions are made, i.e., $TP + FP = 0$).
+- **Conflict Recall**: **50.0%** (Flagged genuine contradictions with dispute warnings).
 - **Specificity**: **100.0%**
 - **Conflict F1 Score**: **66.7%**
 
@@ -203,8 +203,8 @@ Every scenario was audited and explicitly labeled according to ground truth:
 | `SCENARIO_04A_UPDATED_REQUIREMENTS` | UPDATED_REQUIREMENTS | FAIL | FAIL | **PASS** | 0.00 | 0.32 | **1.00** | +4 | 75 / 222 / 129 |
 | `SCENARIO_04B_UPDATED_REQUIREMENTS` | UPDATED_REQUIREMENTS | FAIL | PASS | **PASS** | 0.00 | 1.00 | **1.00** | +5 | 73 / 221 / 364 |
 | `SCENARIO_04C_UPDATED_REQUIREMENTS` | UPDATED_REQUIREMENTS | FAIL | PASS | **PASS** | 0.00 | 1.00 | **1.00** | +4 | 77 / 218 / 362 |
-| `SCENARIO_05A_CONTRADICTORY_CLAIMS` | CONTRADICTORY_CLAIMS | FAIL | FAIL | **PASS** | 1.00 | 1.00 | **1.00** | +0 | 64 / 147 / 408 |
-| `SCENARIO_05B_CONTRADICTORY_CLAIMS` | CONTRADICTORY_CLAIMS | FAIL | FAIL | **FAIL** | 1.00 | 1.00 | **1.00** | +0 | 83 / 168 / 230 |
+| `SCENARIO_05A_CONTRADICTORY_CLAIMS` | CONTRADICTORY_CLAIMS | FAIL | FAIL | **PASS** | 0.00 | 0.00 | **1.00** | +0 | 64 / 147 / 408 |
+| `SCENARIO_05B_CONTRADICTORY_CLAIMS` | CONTRADICTORY_CLAIMS | FAIL | FAIL | **FAIL** | 0.00 | 0.00 | **0.00** | +0 | 83 / 168 / 230 |
 | `SCENARIO_05C_CONTRADICTORY_CLAIMS` | CONTRADICTORY_CLAIMS | FAIL | PASS | **FAIL** | 0.65 | 1.00 | **0.82** | +1 | 53 / 163 / 279 |
 | `SCENARIO_06A_AGENT_SWITCHING` | AGENT_SWITCHING | FAIL | PASS | **PASS** | 0.00 | 1.00 | **1.00** | +4 | 71 / 307 / 479 |
 | `SCENARIO_06B_AGENT_SWITCHING` | AGENT_SWITCHING | FAIL | PASS | **FAIL** | 0.00 | 1.00 | **0.65** | +2 | 67 / 244 / 275 |

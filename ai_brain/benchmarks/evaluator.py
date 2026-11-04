@@ -175,6 +175,7 @@ class BenchmarkAggregateReport:
                 "specificity": round(self.conflict_specificity, 4),
                 "f1_score": round(self.conflict_f1, 4),
                 "temporal_update_recognition_rate": round(self.temporal_update_recognition_rate, 3),
+                "zero_denominator_convention": "Precision is 0.0 by documented convention when zero positive predictions are made (tp + fp == 0)",
             },
             "noise_and_irrelevance": {
                 "irrelevant_retrieved": self.total_irrelevant_memories_retrieved,
@@ -378,8 +379,9 @@ class BenchmarkEvaluator:
                 else:
                     tn += 1
 
-        prec = (tp / (tp + fp)) if (tp + fp) > 0 else 1.0
-        rec = (tp / (tp + fn)) if (tp + fn) > 0 else 1.0
+        # Documented convention: Precision is 0.0 when zero positive predictions are made (tp + fp == 0).
+        prec = (tp / (tp + fp)) if (tp + fp) > 0 else 0.0
+        rec = (tp / (tp + fn)) if (tp + fn) > 0 else 0.0
         spec = (tn / (tn + fp)) if (tn + fp) > 0 else 1.0
         f1_c = (2 * prec * rec) / (prec + rec) if (prec + rec) > 0 else 0.0
 

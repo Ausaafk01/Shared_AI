@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-11-04T18:18:37.409620+00:00",
+  "timestamp": "2026-11-04T19:38:25.464212+00:00",
   "total_scenarios": 30,
   "aggregate_metrics": {
     "total_scenarios": 30,
@@ -80,24 +80,24 @@
       "ML-Enhanced (Reranked)": {
         "strategy": "ML-Enhanced (Reranked)",
         "k": 5,
-        "macro_precision_at_k": 0.6744,
-        "macro_recall_at_k": 0.8333,
-        "macro_f1_score": 0.72,
-        "micro_precision_at_k": 0.5556,
-        "micro_recall_at_k": 0.8571,
-        "micro_f1": 0.6742,
-        "mrr": 0.74,
-        "ndcg_at_k": 0.7631,
-        "irrelevant_retrieval_rate": 0.2922
+        "macro_precision_at_k": 0.6678,
+        "macro_recall_at_k": 0.8,
+        "macro_f1_score": 0.7089,
+        "micro_precision_at_k": 0.537,
+        "micro_recall_at_k": 0.8286,
+        "micro_f1": 0.6517,
+        "mrr": 0.7333,
+        "ndcg_at_k": 0.7502,
+        "irrelevant_retrieval_rate": 0.2989
       }
     },
     "task_continuation": {
       "success_rate_cold_start": 0.0,
       "success_rate_raw_history": 0.833,
       "success_rate_ai_brain": 0.7,
-      "partial_score_cold_start": 0.133,
-      "partial_score_raw_history": 0.932,
-      "partial_score_ai_brain": 0.917,
+      "partial_score_cold_start": 0.067,
+      "partial_score_raw_history": 0.866,
+      "partial_score_ai_brain": 0.883,
       "by_category": {
         "TASK_CONTINUATION": {
           "cold_start_success": 0.0,
@@ -135,9 +135,9 @@
           "cold_start_success": 0.0,
           "raw_history_success": 0.333,
           "ai_brain_success": 0.333,
-          "cold_start_partial": 0.883,
-          "raw_history_partial": 1.0,
-          "ai_brain_partial": 0.942
+          "cold_start_partial": 0.217,
+          "raw_history_partial": 0.333,
+          "ai_brain_partial": 0.608
         },
         "AGENT_SWITCHING": {
           "cold_start_success": 0.0,
@@ -199,7 +199,8 @@
       "recall": 0.5,
       "specificity": 1.0,
       "f1_score": 0.6667,
-      "temporal_update_recognition_rate": 1.0
+      "temporal_update_recognition_rate": 1.0,
+      "zero_denominator_convention": "Precision is 0.0 by documented convention when zero positive predictions are made (tp + fp == 0)"
     },
     "noise_and_irrelevance": {
       "irrelevant_retrieved": 40,
@@ -279,16 +280,16 @@
       "metric_name": "Partial Credit Score (Cluster-Stratified, df=9)",
       "n_clusters": 10,
       "cluster_size": 3,
-      "cluster_mean_diff": 0.783,
-      "cluster_std_error": 0.111,
+      "cluster_mean_diff": 0.817,
+      "cluster_std_error": 0.09,
       "confidence_interval_95": [
-        0.532,
-        1.035
+        0.613,
+        1.02
       ],
-      "t_statistic": 7.051,
+      "t_statistic": 9.084,
       "degrees_of_freedom": 9,
       "is_statistically_significant": true,
-      "notes": "Cluster-stratified across 10 categories (cluster size=3, df=9). Accounts for potential intra-category correlation. Between-category SE=0.111. Difference is statistically significant (p < 0.05)."
+      "notes": "Cluster-stratified across 10 categories (cluster size=3, df=9). Accounts for potential intra-category correlation. Between-category SE=0.090. Difference is statistically significant (p < 0.05)."
     },
     "cluster_tokens": {
       "metric_name": "Total Tokens Consumed (Cluster-Stratified, df=9)",
@@ -364,9 +365,9 @@
         "success_rate_cold_start": 0.0,
         "success_rate_raw_history": 0.333,
         "success_rate_ai_brain": 0.333,
-        "partial_score_cold_start": 0.883,
-        "partial_score_raw_history": 1.0,
-        "partial_score_ai_brain": 0.942,
+        "partial_score_cold_start": 0.217,
+        "partial_score_raw_history": 0.333,
+        "partial_score_ai_brain": 0.608,
         "avg_tokens_cold_start": 66.7,
         "avg_tokens_raw_history": 159.3,
         "avg_tokens_ai_brain": 305.7
@@ -460,22 +461,22 @@
     "partial_success": {
       "metric_name": "Partial Credit Success Score",
       "n_samples": 30,
-      "mean_without_brain": 0.133,
-      "std_without_brain": 0.297,
-      "mean_with_brain": 0.917,
-      "std_with_brain": 0.152,
-      "mean_difference": 0.783,
-      "std_difference": 0.359,
-      "standard_error": 0.066,
+      "mean_without_brain": 0.067,
+      "std_without_brain": 0.182,
+      "mean_with_brain": 0.883,
+      "std_with_brain": 0.225,
+      "mean_difference": 0.817,
+      "std_difference": 0.329,
+      "standard_error": 0.06,
       "confidence_interval_95": [
-        0.649,
-        0.917
+        0.694,
+        0.939
       ],
-      "cohens_d": 2.183,
-      "t_statistic": 11.959,
+      "cohens_d": 2.485,
+      "t_statistic": 13.609,
       "degrees_of_freedom": 29,
       "is_statistically_significant": true,
-      "limitation_notes": "Unclustered paired evaluation across N=30 scenarios (df=29). Effect size Cohen's d=2.18. Paired t-test indicates a statistically significant difference at two-tailed alpha=0.05 (t=11.96)."
+      "limitation_notes": "Unclustered paired evaluation across N=30 scenarios (df=29). Effect size Cohen's d=2.48. Paired t-test indicates a statistically significant difference at two-tailed alpha=0.05 (t=13.61)."
     },
     "repeated_explanations": {
       "metric_name": "Repeated Explanations Needed (Lower is Better)",
@@ -560,22 +561,22 @@
     "raw_partial_success": {
       "metric_name": "Raw History vs Brain: Partial Score",
       "n_samples": 30,
-      "mean_without_brain": 0.932,
-      "std_without_brain": 0.206,
-      "mean_with_brain": 0.917,
-      "std_with_brain": 0.152,
-      "mean_difference": -0.016,
-      "std_difference": 0.278,
-      "standard_error": 0.051,
+      "mean_without_brain": 0.866,
+      "std_without_brain": 0.312,
+      "mean_with_brain": 0.883,
+      "std_with_brain": 0.225,
+      "mean_difference": 0.017,
+      "std_difference": 0.334,
+      "standard_error": 0.061,
       "confidence_interval_95": [
-        -0.12,
-        0.088
+        -0.107,
+        0.142
       ],
-      "cohens_d": -0.057,
-      "t_statistic": -0.312,
+      "cohens_d": 0.052,
+      "t_statistic": 0.287,
       "degrees_of_freedom": 29,
       "is_statistically_significant": false,
-      "limitation_notes": "Unclustered paired evaluation across N=30 scenarios (df=29). Effect size Cohen's d=-0.06. Paired t-test indicates no statistically significant difference at two-tailed alpha=0.05 (t=-0.31)."
+      "limitation_notes": "Unclustered paired evaluation across N=30 scenarios (df=29). Effect size Cohen's d=0.05. Paired t-test indicates no statistically significant difference at two-tailed alpha=0.05 (t=0.29)."
     },
     "raw_total_tokens": {
       "metric_name": "Raw History vs Brain: Tokens Consumed",
@@ -680,7 +681,7 @@
         "missing_details_notes": [
           "Omitted fact: bcrypt with work factor 12"
         ],
-        "execution_time_ms": 13.36,
+        "execution_time_ms": 13.66,
         "error_message": null
       },
       "without_brain": {
@@ -758,7 +759,7 @@
         "missing_details_notes": [
           "Omitted fact: bcrypt with work factor 12"
         ],
-        "execution_time_ms": 13.36,
+        "execution_time_ms": 13.66,
         "error_message": null
       },
       "token_delta": 211,
@@ -803,7 +804,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.28,
+        "execution_time_ms": 0.2,
         "error_message": null
       }
     },
@@ -886,7 +887,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 14.07,
+        "execution_time_ms": 12.28,
         "error_message": null
       },
       "without_brain": {
@@ -962,7 +963,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 14.07,
+        "execution_time_ms": 12.28,
         "error_message": null
       },
       "token_delta": 372,
@@ -1056,7 +1057,7 @@
           "Violated technical constraint: Python 3.12",
           "Violated technical constraint: poetry"
         ],
-        "execution_time_ms": 0.12,
+        "execution_time_ms": 0.09,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -1092,7 +1093,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 10.16,
+        "execution_time_ms": 8.93,
         "error_message": null
       },
       "without_brain": {
@@ -1134,7 +1135,7 @@
           "Violated technical constraint: Python 3.12",
           "Violated technical constraint: poetry"
         ],
-        "execution_time_ms": 0.12,
+        "execution_time_ms": 0.09,
         "error_message": null
       },
       "with_brain": {
@@ -1170,7 +1171,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 10.16,
+        "execution_time_ms": 8.93,
         "error_message": null
       },
       "token_delta": 246,
@@ -1215,7 +1216,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.17,
+        "execution_time_ms": 0.16,
         "error_message": null
       }
     },
@@ -1264,7 +1265,7 @@
           "Missing expected decision: Memcached lacks replication",
           "Violated technical constraint: 3-node replica set"
         ],
-        "execution_time_ms": 0.17,
+        "execution_time_ms": 0.09,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -1300,7 +1301,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 18.22,
+        "execution_time_ms": 15.85,
         "error_message": null
       },
       "without_brain": {
@@ -1342,7 +1343,7 @@
           "Missing expected decision: Memcached lacks replication",
           "Violated technical constraint: 3-node replica set"
         ],
-        "execution_time_ms": 0.17,
+        "execution_time_ms": 0.09,
         "error_message": null
       },
       "with_brain": {
@@ -1378,7 +1379,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 18.22,
+        "execution_time_ms": 15.85,
         "error_message": null
       },
       "token_delta": 621,
@@ -1423,7 +1424,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.29,
+        "execution_time_ms": 0.21,
         "error_message": null
       }
     },
@@ -1471,7 +1472,7 @@
           "Missing expected decision: Use PostgreSQL 16 because ACID transactions",
           "Violated technical constraint: foreign key guarantees"
         ],
-        "execution_time_ms": 0.11,
+        "execution_time_ms": 0.08,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -1507,7 +1508,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 10.1,
+        "execution_time_ms": 8.89,
         "error_message": null
       },
       "without_brain": {
@@ -1548,7 +1549,7 @@
           "Missing expected decision: Use PostgreSQL 16 because ACID transactions",
           "Violated technical constraint: foreign key guarantees"
         ],
-        "execution_time_ms": 0.11,
+        "execution_time_ms": 0.08,
         "error_message": null
       },
       "with_brain": {
@@ -1584,7 +1585,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 10.1,
+        "execution_time_ms": 8.89,
         "error_message": null
       },
       "token_delta": 233,
@@ -1629,7 +1630,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.16,
+        "execution_time_ms": 0.13,
         "error_message": null
       }
     },
@@ -1677,7 +1678,7 @@
           "Missing expected decision: Standardize on Protocol Buffers v3",
           "Violated technical constraint: Protocol Buffers v3"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.12,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -1713,7 +1714,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 10.6,
+        "execution_time_ms": 8.8,
         "error_message": null
       },
       "without_brain": {
@@ -1754,7 +1755,7 @@
           "Missing expected decision: Standardize on Protocol Buffers v3",
           "Violated technical constraint: Protocol Buffers v3"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.12,
         "error_message": null
       },
       "with_brain": {
@@ -1790,7 +1791,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 10.6,
+        "execution_time_ms": 8.8,
         "error_message": null
       },
       "token_delta": 229,
@@ -1885,7 +1886,7 @@
           "Violated technical constraint: timeout 5000ms",
           "Violated technical constraint: SQLAlchemy Core"
         ],
-        "execution_time_ms": 0.11,
+        "execution_time_ms": 0.1,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -1923,7 +1924,7 @@
         "missing_details_notes": [
           "Constraint not explicitly verified: SQLAlchemy Core"
         ],
-        "execution_time_ms": 21.32,
+        "execution_time_ms": 15.72,
         "error_message": null
       },
       "without_brain": {
@@ -1966,7 +1967,7 @@
           "Violated technical constraint: timeout 5000ms",
           "Violated technical constraint: SQLAlchemy Core"
         ],
-        "execution_time_ms": 0.11,
+        "execution_time_ms": 0.1,
         "error_message": null
       },
       "with_brain": {
@@ -2004,7 +2005,7 @@
         "missing_details_notes": [
           "Constraint not explicitly verified: SQLAlchemy Core"
         ],
-        "execution_time_ms": 21.32,
+        "execution_time_ms": 15.72,
         "error_message": null
       },
       "token_delta": 588,
@@ -2049,7 +2050,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.17,
+        "execution_time_ms": 0.16,
         "error_message": null
       }
     },
@@ -2098,7 +2099,7 @@
           "Violated technical constraint: 10MB",
           "Violated technical constraint: 100 requests per minute"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.07,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -2134,7 +2135,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.9,
+        "execution_time_ms": 8.11,
         "error_message": null
       },
       "without_brain": {
@@ -2176,7 +2177,7 @@
           "Violated technical constraint: 10MB",
           "Violated technical constraint: 100 requests per minute"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.07,
         "error_message": null
       },
       "with_brain": {
@@ -2212,7 +2213,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.9,
+        "execution_time_ms": 8.11,
         "error_message": null
       },
       "token_delta": 225,
@@ -2341,7 +2342,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.39,
+        "execution_time_ms": 8.28,
         "error_message": null
       },
       "without_brain": {
@@ -2418,7 +2419,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.39,
+        "execution_time_ms": 8.28,
         "error_message": null
       },
       "token_delta": 239,
@@ -2463,7 +2464,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.11,
+        "execution_time_ms": 0.1,
         "error_message": null
       }
     },
@@ -2511,7 +2512,7 @@
           "Missing expected decision: gRPC protobuf on port 9090",
           "Violated technical constraint: port 9090"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.1,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -2547,7 +2548,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.35,
+        "execution_time_ms": 7.93,
         "error_message": null
       },
       "without_brain": {
@@ -2588,7 +2589,7 @@
           "Missing expected decision: gRPC protobuf on port 9090",
           "Violated technical constraint: port 9090"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.1,
         "error_message": null
       },
       "with_brain": {
@@ -2624,7 +2625,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.35,
+        "execution_time_ms": 7.93,
         "error_message": null
       },
       "token_delta": 54,
@@ -2669,7 +2670,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 1,
         "missing_details_notes": [],
-        "execution_time_ms": 0.13,
+        "execution_time_ms": 0.16,
         "error_message": null
       }
     },
@@ -2718,7 +2719,7 @@
           "Violated technical constraint: 15-minute",
           "Violated technical constraint: 8-hour"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.09,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -2754,7 +2755,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 11.19,
+        "execution_time_ms": 11.46,
         "error_message": null
       },
       "without_brain": {
@@ -2796,7 +2797,7 @@
           "Violated technical constraint: 15-minute",
           "Violated technical constraint: 8-hour"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.09,
         "error_message": null
       },
       "with_brain": {
@@ -2832,7 +2833,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 11.19,
+        "execution_time_ms": 11.46,
         "error_message": null
       },
       "token_delta": 291,
@@ -2877,7 +2878,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.17,
+        "execution_time_ms": 0.14,
         "error_message": null
       }
     },
@@ -2961,7 +2962,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 12.23,
+        "execution_time_ms": 11.32,
         "error_message": null
       },
       "without_brain": {
@@ -3038,7 +3039,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 12.23,
+        "execution_time_ms": 11.32,
         "error_message": null
       },
       "token_delta": 285,
@@ -3115,7 +3116,7 @@
         "facts_recovery_rate": 1.0,
         "decisions_maintenance_rate": 1.0,
         "constraints_adherence_rate": 1.0,
-        "partial_success_score": 1.0,
+        "partial_success_score": 0.0,
         "task_success": false,
         "facts_recovered_count": 0,
         "facts_missed_count": 0,
@@ -3126,7 +3127,7 @@
         "conflict_handled_correctly": false,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.06,
+        "execution_time_ms": 0.07,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -3162,7 +3163,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 12.82,
+        "execution_time_ms": 11.94,
         "error_message": null
       },
       "without_brain": {
@@ -3187,7 +3188,7 @@
         "facts_recovery_rate": 1.0,
         "decisions_maintenance_rate": 1.0,
         "constraints_adherence_rate": 1.0,
-        "partial_success_score": 1.0,
+        "partial_success_score": 0.0,
         "task_success": false,
         "facts_recovered_count": 0,
         "facts_missed_count": 0,
@@ -3198,7 +3199,7 @@
         "conflict_handled_correctly": false,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.06,
+        "execution_time_ms": 0.07,
         "error_message": null
       },
       "with_brain": {
@@ -3234,13 +3235,13 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 12.82,
+        "execution_time_ms": 11.94,
         "error_message": null
       },
       "token_delta": 344,
       "token_reduction_pct": -537.5,
       "task_continuation_delta": 1,
-      "partial_score_delta": 0.0,
+      "partial_score_delta": 1.0,
       "repeated_explanations_avoided": 0,
       "retrieval_precision_at_k": 0.0,
       "retrieval_recall_at_k": 1.0,
@@ -3268,7 +3269,7 @@
         "facts_recovery_rate": 1.0,
         "decisions_maintenance_rate": 1.0,
         "constraints_adherence_rate": 1.0,
-        "partial_success_score": 1.0,
+        "partial_success_score": 0.0,
         "task_success": false,
         "facts_recovered_count": 0,
         "facts_missed_count": 0,
@@ -3311,7 +3312,7 @@
         "facts_recovery_rate": 1.0,
         "decisions_maintenance_rate": 1.0,
         "constraints_adherence_rate": 1.0,
-        "partial_success_score": 1.0,
+        "partial_success_score": 0.0,
         "task_success": false,
         "facts_recovered_count": 0,
         "facts_missed_count": 0,
@@ -3347,7 +3348,7 @@
         "facts_recovery_rate": 1.0,
         "decisions_maintenance_rate": 1.0,
         "constraints_adherence_rate": 1.0,
-        "partial_success_score": 1.0,
+        "partial_success_score": 0.0,
         "task_success": false,
         "facts_recovered_count": 0,
         "facts_missed_count": 0,
@@ -3358,7 +3359,7 @@
         "conflict_handled_correctly": false,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.9,
+        "execution_time_ms": 8.57,
         "error_message": null
       },
       "without_brain": {
@@ -3383,7 +3384,7 @@
         "facts_recovery_rate": 1.0,
         "decisions_maintenance_rate": 1.0,
         "constraints_adherence_rate": 1.0,
-        "partial_success_score": 1.0,
+        "partial_success_score": 0.0,
         "task_success": false,
         "facts_recovered_count": 0,
         "facts_missed_count": 0,
@@ -3419,7 +3420,7 @@
         "facts_recovery_rate": 1.0,
         "decisions_maintenance_rate": 1.0,
         "constraints_adherence_rate": 1.0,
-        "partial_success_score": 1.0,
+        "partial_success_score": 0.0,
         "task_success": false,
         "facts_recovered_count": 0,
         "facts_missed_count": 0,
@@ -3430,7 +3431,7 @@
         "conflict_handled_correctly": false,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.9,
+        "execution_time_ms": 8.57,
         "error_message": null
       },
       "token_delta": 147,
@@ -3464,7 +3465,7 @@
         "facts_recovery_rate": 1.0,
         "decisions_maintenance_rate": 1.0,
         "constraints_adherence_rate": 1.0,
-        "partial_success_score": 1.0,
+        "partial_success_score": 0.0,
         "task_success": false,
         "facts_recovered_count": 0,
         "facts_missed_count": 0,
@@ -3475,7 +3476,7 @@
         "conflict_handled_correctly": false,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.1,
+        "execution_time_ms": 0.11,
         "error_message": null
       }
     },
@@ -3559,7 +3560,7 @@
         "missing_details_notes": [
           "Omitted fact: PostgreSQL 16 on port 5432"
         ],
-        "execution_time_ms": 10.44,
+        "execution_time_ms": 11.68,
         "error_message": null
       },
       "without_brain": {
@@ -3636,7 +3637,7 @@
         "missing_details_notes": [
           "Omitted fact: PostgreSQL 16 on port 5432"
         ],
-        "execution_time_ms": 10.44,
+        "execution_time_ms": 11.68,
         "error_message": null
       },
       "token_delta": 226,
@@ -3765,7 +3766,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 13.16,
+        "execution_time_ms": 12.16,
         "error_message": null
       },
       "without_brain": {
@@ -3842,7 +3843,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 13.16,
+        "execution_time_ms": 12.16,
         "error_message": null
       },
       "token_delta": 408,
@@ -3972,7 +3973,7 @@
         "missing_details_notes": [
           "Omitted fact: parameterized queries"
         ],
-        "execution_time_ms": 9.13,
+        "execution_time_ms": 9.04,
         "error_message": null
       },
       "without_brain": {
@@ -4050,7 +4051,7 @@
         "missing_details_notes": [
           "Omitted fact: parameterized queries"
         ],
-        "execution_time_ms": 9.13,
+        "execution_time_ms": 9.04,
         "error_message": null
       },
       "token_delta": 208,
@@ -4095,7 +4096,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.15,
+        "execution_time_ms": 0.14,
         "error_message": null
       }
     },
@@ -4179,7 +4180,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.23,
+        "execution_time_ms": 8.5,
         "error_message": null
       },
       "without_brain": {
@@ -4256,7 +4257,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.23,
+        "execution_time_ms": 8.5,
         "error_message": null
       },
       "token_delta": 242,
@@ -4387,7 +4388,7 @@
           "Omitted fact: Batches 1 through 5",
           "Omitted fact: record ID 52,143"
         ],
-        "execution_time_ms": 8.94,
+        "execution_time_ms": 9.24,
         "error_message": null
       },
       "without_brain": {
@@ -4466,7 +4467,7 @@
           "Omitted fact: Batches 1 through 5",
           "Omitted fact: record ID 52,143"
         ],
-        "execution_time_ms": 8.94,
+        "execution_time_ms": 9.24,
         "error_message": null
       },
       "token_delta": 163,
@@ -4511,7 +4512,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.14,
+        "execution_time_ms": 0.13,
         "error_message": null
       }
     },
@@ -4557,7 +4558,7 @@
           "Missing expected fact: documents 1 through 141",
           "Missing expected fact: Document 142 timed out"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.09,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -4596,7 +4597,7 @@
           "Omitted fact: documents 1 through 141",
           "Omitted fact: Document 142 timed out"
         ],
-        "execution_time_ms": 8.17,
+        "execution_time_ms": 9.2,
         "error_message": null
       },
       "without_brain": {
@@ -4635,7 +4636,7 @@
           "Missing expected fact: documents 1 through 141",
           "Missing expected fact: Document 142 timed out"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.09,
         "error_message": null
       },
       "with_brain": {
@@ -4674,7 +4675,7 @@
           "Omitted fact: documents 1 through 141",
           "Omitted fact: Document 142 timed out"
         ],
-        "execution_time_ms": 8.17,
+        "execution_time_ms": 9.2,
         "error_message": null
       },
       "token_delta": 149,
@@ -4803,7 +4804,7 @@
         "missing_details_notes": [
           "Omitted fact: 004_add_indexes failed"
         ],
-        "execution_time_ms": 8.68,
+        "execution_time_ms": 8.4,
         "error_message": null
       },
       "without_brain": {
@@ -4880,7 +4881,7 @@
         "missing_details_notes": [
           "Omitted fact: 004_add_indexes failed"
         ],
-        "execution_time_ms": 8.68,
+        "execution_time_ms": 8.4,
         "error_message": null
       },
       "token_delta": 160,
@@ -5009,7 +5010,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 15.87,
+        "execution_time_ms": 11.72,
         "error_message": null
       },
       "without_brain": {
@@ -5086,7 +5087,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 15.87,
+        "execution_time_ms": 11.72,
         "error_message": null
       },
       "token_delta": 396,
@@ -5131,7 +5132,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.12,
+        "execution_time_ms": 0.13,
         "error_message": null
       }
     },
@@ -5178,7 +5179,7 @@
           "Missing expected decision: mTLS client certificate path",
           "Violated technical constraint: /etc/ssl/private/mesh-client.key"
         ],
-        "execution_time_ms": 0.1,
+        "execution_time_ms": 0.08,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -5214,7 +5215,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.87,
+        "execution_time_ms": 8.61,
         "error_message": null
       },
       "without_brain": {
@@ -5254,7 +5255,7 @@
           "Missing expected decision: mTLS client certificate path",
           "Violated technical constraint: /etc/ssl/private/mesh-client.key"
         ],
-        "execution_time_ms": 0.1,
+        "execution_time_ms": 0.08,
         "error_message": null
       },
       "with_brain": {
@@ -5290,7 +5291,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.87,
+        "execution_time_ms": 8.61,
         "error_message": null
       },
       "token_delta": 232,
@@ -5335,7 +5336,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.14,
+        "execution_time_ms": 0.11,
         "error_message": null
       }
     },
@@ -5419,7 +5420,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 10.97,
+        "execution_time_ms": 8.25,
         "error_message": null
       },
       "without_brain": {
@@ -5496,7 +5497,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 10.97,
+        "execution_time_ms": 8.25,
         "error_message": null
       },
       "token_delta": 237,
@@ -5541,7 +5542,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.11,
+        "execution_time_ms": 0.12,
         "error_message": null
       }
     },
@@ -5624,7 +5625,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 58.42,
+        "execution_time_ms": 47.24,
         "error_message": null
       },
       "without_brain": {
@@ -5700,7 +5701,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 58.42,
+        "execution_time_ms": 47.24,
         "error_message": null
       },
       "token_delta": 1109,
@@ -5708,9 +5709,9 @@
       "task_continuation_delta": 1,
       "partial_score_delta": 1.0,
       "repeated_explanations_avoided": 3,
-      "retrieval_precision_at_k": 0.0,
-      "retrieval_recall_at_k": 0.0,
-      "retrieval_f1": 0.0,
+      "retrieval_precision_at_k": 0.2,
+      "retrieval_recall_at_k": 0.3333,
+      "retrieval_f1": 0.25,
       "conflict_handling_delta": 0,
       "condition_b_raw_history": {
         "scenario_id": "SCENARIO_09A_NEEDLE_IN_HAYSTACK",
@@ -5745,7 +5746,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.4,
+        "execution_time_ms": 0.53,
         "error_message": null
       }
     },
@@ -5832,7 +5833,7 @@
           "Omitted fact: Argon2id",
           "Constraint not explicitly verified: Argon2id"
         ],
-        "execution_time_ms": 57.6,
+        "execution_time_ms": 49.11,
         "error_message": null
       },
       "without_brain": {
@@ -5912,7 +5913,7 @@
           "Omitted fact: Argon2id",
           "Constraint not explicitly verified: Argon2id"
         ],
-        "execution_time_ms": 57.6,
+        "execution_time_ms": 49.11,
         "error_message": null
       },
       "token_delta": 1175,
@@ -5957,7 +5958,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.85,
+        "execution_time_ms": 0.63,
         "error_message": null
       }
     },
@@ -6004,7 +6005,7 @@
           "Missing expected decision: endpoint runs on private internal port 9876",
           "Violated technical constraint: port 9876"
         ],
-        "execution_time_ms": 0.31,
+        "execution_time_ms": 0.2,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -6040,7 +6041,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 58.39,
+        "execution_time_ms": 53.86,
         "error_message": null
       },
       "without_brain": {
@@ -6080,7 +6081,7 @@
           "Missing expected decision: endpoint runs on private internal port 9876",
           "Violated technical constraint: port 9876"
         ],
-        "execution_time_ms": 0.31,
+        "execution_time_ms": 0.2,
         "error_message": null
       },
       "with_brain": {
@@ -6116,7 +6117,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 58.39,
+        "execution_time_ms": 53.86,
         "error_message": null
       },
       "token_delta": 1514,
@@ -6161,7 +6162,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.43,
+        "execution_time_ms": 0.39,
         "error_message": null
       }
     },
@@ -6245,7 +6246,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 11.75,
+        "execution_time_ms": 10.45,
         "error_message": null
       },
       "without_brain": {
@@ -6322,7 +6323,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 11.75,
+        "execution_time_ms": 10.45,
         "error_message": null
       },
       "token_delta": 294,
@@ -6367,7 +6368,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 1,
         "missing_details_notes": [],
-        "execution_time_ms": 0.15,
+        "execution_time_ms": 0.22,
         "error_message": null
       }
     },
@@ -6415,7 +6416,7 @@
           "Missing expected decision: Python 3.12 on Debian bookworm",
           "Violated technical constraint: Python 3.12"
         ],
-        "execution_time_ms": 0.09,
+        "execution_time_ms": 0.08,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -6451,7 +6452,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 10.02,
+        "execution_time_ms": 8.97,
         "error_message": null
       },
       "without_brain": {
@@ -6492,7 +6493,7 @@
           "Missing expected decision: Python 3.12 on Debian bookworm",
           "Violated technical constraint: Python 3.12"
         ],
-        "execution_time_ms": 0.09,
+        "execution_time_ms": 0.08,
         "error_message": null
       },
       "with_brain": {
@@ -6528,7 +6529,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 10.02,
+        "execution_time_ms": 8.97,
         "error_message": null
       },
       "token_delta": 233,
@@ -6573,7 +6574,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 1,
         "missing_details_notes": [],
-        "execution_time_ms": 0.17,
+        "execution_time_ms": 0.14,
         "error_message": null
       }
     },
@@ -6621,7 +6622,7 @@
           "Missing expected decision: served via CloudFront CDN distribution",
           "Violated technical constraint: https://cdn.example.com"
         ],
-        "execution_time_ms": 0.09,
+        "execution_time_ms": 0.08,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -6657,7 +6658,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 11.95,
+        "execution_time_ms": 10.69,
         "error_message": null
       },
       "without_brain": {
@@ -6698,7 +6699,7 @@
           "Missing expected decision: served via CloudFront CDN distribution",
           "Violated technical constraint: https://cdn.example.com"
         ],
-        "execution_time_ms": 0.09,
+        "execution_time_ms": 0.08,
         "error_message": null
       },
       "with_brain": {
@@ -6734,7 +6735,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 11.95,
+        "execution_time_ms": 10.69,
         "error_message": null
       },
       "token_delta": 324,
@@ -6779,7 +6780,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.15,
+        "execution_time_ms": 0.14,
         "error_message": null
       }
     }

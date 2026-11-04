@@ -401,6 +401,75 @@ class TestBenchmarkSubsystem(unittest.TestCase):
         actual_c = sum(1 for c in comparisons if c.result_with_brain.task_success)
         self.assertEqual(sum_c, actual_c)
 
+    def test_strict_success_vs_partial_credit_audit(self) -> None:
+        """Audit strict binary success vs partial credit across 05A, 05B, 05C, and 07A."""
+        # 05A: Pure Contradiction
+        sc_05a = self.dataset.get_scenario("SCENARIO_05A_CONTRADICTORY_CLAIMS")
+        res_a_05a = self.runner.run_condition_a(sc_05a)
+        res_b_05a = self.runner.run_condition_b_raw_history(sc_05a)
+        res_c_05a = self.runner.run_condition_c_brain(sc_05a)
+
+        self.assertFalse(res_a_05a.task_success)
+        self.assertEqual(res_a_05a.partial_success_score, 0.0)  # Contradiction missed
+        self.assertFalse(res_b_05a.task_success)
+        self.assertEqual(res_b_05a.partial_success_score, 0.0)  # Contradiction missed in raw history
+        self.assertTrue(res_c_05a.task_success)
+        self.assertEqual(res_c_05a.partial_success_score, 1.0)  # Dispute detected & preserved
+
+        # 05B: Pure Contradiction (extraction limitation)
+        sc_05b = self.dataset.get_scenario("SCENARIO_05B_CONTRADICTORY_CLAIMS")
+        res_a_05b = self.runner.run_condition_a(sc_05b)
+        res_b_05b = self.runner.run_condition_b_raw_history(sc_05b)
+        res_c_05b = self.runner.run_condition_c_brain(sc_05b)
+
+        # Neither condition handles conflict -> MUST NOT receive 100% partial credit!
+        self.assertFalse(res_b_05b.task_success)
+        self.assertEqual(res_b_05b.partial_success_score, 0.0)
+        self.assertFalse(res_c_05b.task_success)
+        self.assertEqual(res_c_05b.partial_success_score, 0.0)
+
+        # 05C: Compatible Claims (Continuous credit for 1/2 recovered facts)
+        sc_05c = self.dataset.get_scenario("SCENARIO_05C_CONTRADICTORY_CLAIMS")
+        res_c_05c = self.runner.run_condition_c_brain(sc_05c)
+        self.assertFalse(res_c_05c.task_success)  # 50% fact recovery < 75% threshold
+        self.assertAlmostEqual(res_c_05c.partial_success_score, 0.825, places=3)
+
+        # 07A: Session Interruption (Constraint adhered, facts missing)
+        sc_07a = self.dataset.get_scenario("SCENARIO_07A_SESSION_INTERRUPTION")
+        res_c_07a = self.runner.run_condition_c_brain(sc_07a)
+        self.assertFalse(res_c_07a.task_success)  # 0% fact recovery < 75% threshold
+        self.assertAlmostEqual(res_c_07a.partial_success_score, 0.650, places=3)
+
+    def test_cluster_stratified_statistical_calculations(self) -> None:
+        """Verify cluster standard error, t-statistic, and confidence intervals across 10 categories (df=9)."""
+        scenarios = self.dataset.list_scenarios()
+        comparisons = [self.runner.run_scenario(s) for s in scenarios]
+        stats = BenchmarkStatistics.compute_all_comparisons(comparisons)
+
+        cluster_task = stats["cluster_task_success"]
+        self.assertEqual(cluster_task.degrees_of_freedom, 9)
+        self.assertAlmostEqual(cluster_task.cluster_mean_diff, 0.7000, places=4)
+        self.assertAlmostEqual(cluster_task.cluster_std_error, 0.1048, places=3)
+        self.assertAlmostEqual(cluster_task.t_statistic, 6.678, places=2)
+        self.assertAlmostEqual(cluster_task.confidence_interval_95[0], 0.4629, places=3)
+        self.assertAlmostEqual(cluster_task.confidence_interval_95[1], 0.9371, places=3)
+        self.assertTrue(cluster_task.is_statistically_significant)
+
+    def test_zero_denominator_conflict_precision_convention(self) -> None:
+        """Verify that zero predicted positive conflicts yields precision 0.0 by documented convention."""
+        # Create dummy comparison with no positive predictions
+        sc_compat = self.dataset.get_scenario("SCENARIO_05C_CONTRADICTORY_CLAIMS")
+        comp = self.runner.run_scenario(sc_compat)
+        # Verify comp has no predicted conflict
+        self.assertFalse(comp.result_with_brain.conflict_detected)
+
+        aggregate = BenchmarkEvaluator.evaluate([comp])
+        # TP = 0, FP = 0 -> zero positive predictions
+        self.assertEqual(aggregate.conflict_true_positives, 0)
+        self.assertEqual(aggregate.conflict_false_positives, 0)
+        self.assertEqual(aggregate.conflict_precision, 0.0)
+
+
 
 if __name__ == "__main__":
     unittest.main()

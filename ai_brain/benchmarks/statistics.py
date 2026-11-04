@@ -118,29 +118,31 @@ class ClusterAwareStatisticalSummary:
     metric_name: str
     n_clusters: int                  # 10 scenario categories
     cluster_size: int                # 3 scenarios per category
-    cluster_mean_diff: float         # Mean difference across cluster means
+    cluster_mean_diff: float         # Mean difference across cluster means (C - A)
     cluster_std_error: float         # Between-cluster standard error
     confidence_interval_95: Tuple[float, float]
     t_statistic: float
     degrees_of_freedom: int          # df = K - 1 = 9
     is_statistically_significant: bool
     notes: str
+    category_differences: Tuple[float, ...] = ()  # Paired differences per category (C - A)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "metric_name": self.metric_name,
             "n_clusters": self.n_clusters,
             "cluster_size": self.cluster_size,
-            "cluster_mean_diff": round(self.cluster_mean_diff, 3),
-            "cluster_std_error": round(self.cluster_std_error, 3),
+            "cluster_mean_diff": round(self.cluster_mean_diff, 4),
+            "cluster_std_error": round(self.cluster_std_error, 4),
             "confidence_interval_95": (
-                round(self.confidence_interval_95[0], 3),
-                round(self.confidence_interval_95[1], 3),
+                round(self.confidence_interval_95[0], 4),
+                round(self.confidence_interval_95[1], 4),
             ),
             "t_statistic": round(self.t_statistic, 3),
             "degrees_of_freedom": self.degrees_of_freedom,
             "is_statistically_significant": self.is_statistically_significant,
             "notes": self.notes,
+            "category_differences": [round(d, 4) for d in self.category_differences],
         }
 
 
@@ -261,8 +263,11 @@ class BenchmarkStatistics:
 
         notes = (
             f"Cluster-stratified across {k_clusters} categories (cluster size=3, df={df}). "
-            f"Accounts for potential intra-category correlation. "
-            f"Between-category SE={se_cluster:.3f}. Difference is "
+            f"Direction defined as Condition C minus Condition A (C - A). "
+            f"Exploratory and conditional on treating the {k_clusters} categories as independent clusters; "
+            f"these results do not establish general performance across real-world agent tasks, "
+            f"and statistical significance does not constitute proof of general superiority. "
+            f"Between-category SE={se_cluster:.4f}, t={t_stat:.3f}. Difference is "
             f"{'statistically significant (p < 0.05)' if is_sig else 'not statistically significant'}."
         )
 
@@ -277,6 +282,7 @@ class BenchmarkStatistics:
             degrees_of_freedom=df,
             is_statistically_significant=is_sig,
             notes=notes,
+            category_differences=tuple(cat_diffs),
         )
 
     @classmethod
@@ -381,7 +387,17 @@ class BenchmarkStatistics:
         cluster_tokens = cls.compute_cluster_aware_analysis(
             comparisons,
             lambda c: (float(c.result_with_brain.total_tokens), float(c.result_without_brain.total_tokens)),
-            "Total Tokens Consumed (Cluster-Stratified, df=9)",
+            "Total Tokens Consumed Overhead (Cluster-Stratified, df=9)",
+        )
+        cluster_explanations = cls.compute_cluster_aware_analysis(
+            comparisons,
+            lambda c: (float(c.result_with_brain.repeated_explanations_needed), float(c.result_without_brain.repeated_explanations_needed)),
+            "Repeated Explanations Needed (Cluster-Stratified, df=9)",
+        )
+        cluster_decisions = cls.compute_cluster_aware_analysis(
+            comparisons,
+            lambda c: (float(c.result_with_brain.decisions_maintained_count), float(c.result_without_brain.decisions_maintained_count)),
+            "Decisions Maintained (Cluster-Stratified, df=9)",
         )
 
         # 3. Category Summaries Breakdown (All 10 Categories)
@@ -441,6 +457,8 @@ class BenchmarkStatistics:
             "cluster_task_success": cluster_task_success,
             "cluster_partial_success": cluster_partial,
             "cluster_tokens": cluster_tokens,
+            "cluster_repeated_explanations": cluster_explanations,
+            "cluster_decisions_maintained": cluster_decisions,
             "category_summaries": {k: v.to_dict() for k, v in cat_summaries.items()},
             "task_success": task_summary,
             "partial_success": partial_summary,

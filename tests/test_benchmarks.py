@@ -441,19 +441,57 @@ class TestBenchmarkSubsystem(unittest.TestCase):
         self.assertAlmostEqual(res_c_07a.partial_success_score, 0.650, places=3)
 
     def test_cluster_stratified_statistical_calculations(self) -> None:
-        """Verify cluster standard error, t-statistic, and confidence intervals across 10 categories (df=9)."""
+        """Verify cluster standard error, t-statistic, confidence intervals, and underlying 10-cluster vectors (df=9)."""
         scenarios = self.dataset.list_scenarios()
         comparisons = [self.runner.run_scenario(s) for s in scenarios]
         stats = BenchmarkStatistics.compute_all_comparisons(comparisons)
 
+        # 1. Task Success
         cluster_task = stats["cluster_task_success"]
         self.assertEqual(cluster_task.degrees_of_freedom, 9)
+        self.assertEqual(len(cluster_task.category_differences), 10)
         self.assertAlmostEqual(cluster_task.cluster_mean_diff, 0.7000, places=4)
         self.assertAlmostEqual(cluster_task.cluster_std_error, 0.1048, places=3)
         self.assertAlmostEqual(cluster_task.t_statistic, 6.678, places=2)
         self.assertAlmostEqual(cluster_task.confidence_interval_95[0], 0.4629, places=3)
         self.assertAlmostEqual(cluster_task.confidence_interval_95[1], 0.9371, places=3)
         self.assertTrue(cluster_task.is_statistically_significant)
+
+        # 2. Partial Credit Score
+        cluster_partial = stats["cluster_partial_success"]
+        self.assertEqual(len(cluster_partial.category_differences), 10)
+        self.assertAlmostEqual(cluster_partial.cluster_mean_diff, 0.8167, places=4)
+        self.assertAlmostEqual(cluster_partial.cluster_std_error, 0.0899, places=3)
+        self.assertAlmostEqual(cluster_partial.t_statistic, 9.084, places=2)
+        self.assertAlmostEqual(cluster_partial.confidence_interval_95[0], 0.6133, places=3)
+        self.assertAlmostEqual(cluster_partial.confidence_interval_95[1], 1.0200, places=3)
+
+        # 3. Tokens Consumed Overhead (Direction: C - A)
+        cluster_tok = stats["cluster_tokens"]
+        self.assertEqual(len(cluster_tok.category_differences), 10)
+        self.assertAlmostEqual(cluster_tok.cluster_mean_diff, 371.8333, places=2)
+        self.assertAlmostEqual(cluster_tok.cluster_std_error, 101.1697, places=2)
+        self.assertAlmostEqual(cluster_tok.t_statistic, 3.675, places=2)
+        self.assertAlmostEqual(cluster_tok.confidence_interval_95[0], 142.9875, places=1)
+        self.assertAlmostEqual(cluster_tok.confidence_interval_95[1], 600.6792, places=1)
+
+        # 4. Repeated Explanations (Direction: C - A, negative indicates reduction)
+        cluster_exp = stats["cluster_repeated_explanations"]
+        self.assertEqual(len(cluster_exp.category_differences), 10)
+        self.assertAlmostEqual(cluster_exp.cluster_mean_diff, -3.1333, places=3)
+        self.assertAlmostEqual(cluster_exp.cluster_std_error, 0.4771, places=3)
+        self.assertAlmostEqual(cluster_exp.t_statistic, -6.567, places=2)
+        self.assertAlmostEqual(cluster_exp.confidence_interval_95[0], -4.2126, places=2)
+        self.assertAlmostEqual(cluster_exp.confidence_interval_95[1], -2.0541, places=2)
+
+        # 5. Decisions Maintained
+        cluster_dec = stats["cluster_decisions_maintained"]
+        self.assertEqual(len(cluster_dec.category_differences), 10)
+        self.assertAlmostEqual(cluster_dec.cluster_mean_diff, 0.8333, places=3)
+        self.assertAlmostEqual(cluster_dec.cluster_std_error, 0.1427, places=3)
+        self.assertAlmostEqual(cluster_dec.t_statistic, 5.839, places=2)
+        self.assertAlmostEqual(cluster_dec.confidence_interval_95[0], 0.5105, places=3)
+        self.assertAlmostEqual(cluster_dec.confidence_interval_95[1], 1.1562, places=3)
 
     def test_zero_denominator_conflict_precision_convention(self) -> None:
         """Verify that zero predicted positive conflicts yields precision 0.0 by documented convention."""

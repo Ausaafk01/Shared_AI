@@ -188,14 +188,53 @@ class BenchmarkReporter:
             )
 
         md.append("### Cluster-Stratified Category Analysis (df = 9, Critical t = 2.262)\n")
-        md.append("| Clustered Metric | Mean Diff (C - A) | Cluster Std Error | 95% Confidence Interval | t-Statistic | Significant (p<0.05) |")
-        md.append("|---|---:|---:|:---:|---:|:---:|")
+        md.append(
+            "> [!WARNING]\n"
+            "> **Statistical Inference Qualification**: The category-level t-tests, p-values, and confidence intervals below are "
+            "**exploratory and conditional on treating the ten categories as independent clusters**. "
+            "Because the 30 benchmark scenarios represent curated software engineering tasks rather than a random sample of real-world agent tasks, "
+            "**these results do not establish general performance across real-world agent tasks, and statistical significance must not be interpreted as proof of general superiority**.\n\n"
+            "> [!NOTE]\n"
+            "> **Directionality & Token Overhead Interpretation**: Subtraction direction is explicitly defined as **Condition C minus Condition A ($C - A$)**. "
+            "For tokens consumed, the positive difference (+371.83 tokens) means AI Brain consumes more tokens than Cold Start. "
+            "This reflects **additional token overhead** from context injection, **not a performance improvement**.\n\n"
+        )
+        md.append("| Clustered Metric | Mean Diff (C - A) | Cluster Std Error | 95% Confidence Interval | t-Statistic | Significant (p<0.05) | Interpretation |")
+        md.append("|---|---:|---:|:---:|---:|:---:|---|")
 
-        for c_key in ("cluster_task_success", "cluster_partial_success", "cluster_tokens"):
+        cluster_keys = (
+            ("cluster_task_success", "Higher is better (Task Pass Rate)"),
+            ("cluster_partial_success", "Higher is better (Partial Credit)"),
+            ("cluster_tokens", "Lower is better (+371.83 token overhead)"),
+            ("cluster_repeated_explanations", "Lower is better (Explanations reduced)"),
+            ("cluster_decisions_maintained", "Higher is better (Decisions preserved)"),
+        )
+        for c_key, interp_note in cluster_keys:
             cm = stats.get(c_key)
             if isinstance(cm, ClusterAwareStatisticalSummary):
                 ci_str = f"[{cm.confidence_interval_95[0]:.2f}, {cm.confidence_interval_95[1]:.2f}]"
-                md.append(f"| **{cm.metric_name}** | {cm.cluster_mean_diff:+.3f} | {cm.cluster_std_error:.3f} | {ci_str} | {cm.t_statistic:.2f} | {'Yes' if cm.is_statistically_significant else 'No'} |")
+                md.append(f"| **{cm.metric_name}** | {cm.cluster_mean_diff:+.3f} | {cm.cluster_std_error:.3f} | {ci_str} | {cm.t_statistic:.2f} | {'Yes' if cm.is_statistically_significant else 'No'} | {interp_note} |")
+
+        md.append("\n### Underlying Category-Level Paired Differences (Condition C minus Condition A)\n")
+        md.append(
+            "The table below exposes the ten category-level cluster means and paired differences ($D_k = C_k - A_k$) directly used to compute the summary statistics:\n\n"
+            "| Category ($k$) | Task Success Diff | Partial Credit Diff | Token Overhead ($C - A$) | Explanations Diff ($C - A$) | Decisions Diff ($C - A$) |\n"
+            "|---|---:|---:|---:|---:|---:|\n"
+        )
+        cat_dict = stats.get("category_summaries", {})
+        ts_diffs = stats.get("cluster_task_success").category_differences if isinstance(stats.get("cluster_task_success"), ClusterAwareStatisticalSummary) else ()
+        pc_diffs = stats.get("cluster_partial_success").category_differences if isinstance(stats.get("cluster_partial_success"), ClusterAwareStatisticalSummary) else ()
+        tok_diffs = stats.get("cluster_tokens").category_differences if isinstance(stats.get("cluster_tokens"), ClusterAwareStatisticalSummary) else ()
+        exp_diffs = stats.get("cluster_repeated_explanations").category_differences if isinstance(stats.get("cluster_repeated_explanations"), ClusterAwareStatisticalSummary) else ()
+        dec_diffs = stats.get("cluster_decisions_maintained").category_differences if isinstance(stats.get("cluster_decisions_maintained"), ClusterAwareStatisticalSummary) else ()
+
+        for idx, (cat_name, cs) in enumerate(cat_dict.items()):
+            d_ts = f"{ts_diffs[idx]:+.3f}" if idx < len(ts_diffs) else "N/A"
+            d_pc = f"{pc_diffs[idx]:+.3f}" if idx < len(pc_diffs) else "N/A"
+            d_tok = f"{tok_diffs[idx]:+.1f}" if idx < len(tok_diffs) else "N/A"
+            d_exp = f"{exp_diffs[idx]:+.3f}" if idx < len(exp_diffs) else "N/A"
+            d_dec = f"{dec_diffs[idx]:+.3f}" if idx < len(dec_diffs) else "N/A"
+            md.append(f"| **`{cat_name}`** | {d_ts} | {d_pc} | {d_tok} | {d_exp} | {d_dec} |")
 
         md.append("\n### Category-Level Detailed Breakdown (10 Clusters)\n")
         md.append("| Category | N | Cold Start Pass | Raw History Pass | AI Brain Pass | Cold Partial | Raw Partial | Brain Partial | Tokens (A / B / C) |")
@@ -325,6 +364,9 @@ class BenchmarkReporter:
             "- **Direct Answer**: **No for single isolated queries, but yes compared to unbounded raw event replay in long sessions.**\n"
             f"- For a single query, Condition C consumes **{aggregate.token_metrics.avg_total_tokens_with_brain:.1f} estimated tokens** compared to "
             f"**{aggregate.token_metrics.avg_total_tokens_without_brain:.1f} estimated tokens** for Cold Start (+{aggregate.token_metrics.token_increase_pct:.1f}% context overhead).\n"
+            "- **Token Cost Direction & Overhead**: The category-level token difference is **+371.83 tokens** ($C - A$). "
+            "Subtraction direction is defined as Condition C minus Condition A. A positive difference indicates that AI Brain consumes more tokens than Cold Start. "
+            "This constitutes **additional token overhead**, not a performance improvement.\n"
             f"- However, compared to Raw History ({aggregate.token_metrics.avg_total_tokens_raw_history:.1f} estimated tokens in early multi-turn sessions), "
             "Brain's budgeted context package bounds token growth, preventing transcript overflow as history expands.\n"
         )
@@ -345,8 +387,9 @@ class BenchmarkReporter:
         md.append(
             f"- **Direct Answer**: **Significantly over Cold Start (+70.0%), with qualitative superiority over Raw History on supersession and conflicts.**\n"
             f"- Task continuation success is **{aggregate.task_success_rate_cold_start * 100:.1f}% for Cold Start**, **{aggregate.task_success_rate_raw_history * 100:.1f}% for Raw History**, and **{aggregate.task_success_rate_ai_brain * 100:.1f}% for AI Brain**.\n"
-            f"- McNemar test vs Cold Start: **{p_ac_str}** (statistically significant).\n"
+            f"- McNemar test vs Cold Start: **{p_ac_str}** (statistically significant on benchmark dataset).\n"
             f"- McNemar test vs Raw History: **{p_bc_str}** (not statistically significant in nominal pass rate). Condition B achieves higher nominal pass on basic static tasks (83.3% vs 70.0%) because raw logs retain full text without extraction cutoffs; however, Condition B fails completely on supersession and contradiction management (leaking stale requirements in 4 scenarios), whereas Brain achieves 100% stale rejection and 100% dispute handling.\n"
+            "- **Generalization Safeguard**: Category-level statistical significance is exploratory and conditional on treating the 10 categories as independent clusters. It does not establish general superiority across open-ended real-world agent tasks.\n"
         )
 
         md.append("### 4. Does it reduce repeated explanations?")
@@ -387,8 +430,10 @@ class BenchmarkReporter:
         md.append(
             "1. **Curated Domain Scenarios**: The 30 scenarios represent structured software engineering tasks. "
             "Real-world deployments will feature noisier event logs and informal conversational interruptions.\n"
-            "2. **Cluster Independence**: With 10 categories of 3 scenarios each, cluster-stratified analysis confirms significance at df=9, "
-            "but broader multi-project trials are required before claiming general production validation.\n"
+            "2. **Cluster Independence & Statistical Qualification**: With 10 categories of 3 scenarios each, "
+            "category-level t-tests, p-values, and confidence intervals are exploratory and conditional on treating the 10 categories as independent clusters. "
+            "Because the benchmark scenarios represent curated software engineering workflows rather than a random sample of all possible agent workloads, "
+            "these results do not establish general performance across real-world agent tasks, and statistical significance must not be interpreted as proof of general superiority.\n"
             "3. **Tokenizer Approximation**: All token figures are estimated using `DeterministicTokenizer` (~4 characters per token heuristic approximation).\n"
             "4. **Zero Data Contamination**: All runs executed in isolated in-memory SQLite stores (`:memory:`) without touching production databases.\n"
         )

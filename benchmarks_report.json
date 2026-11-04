@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-11-04T19:38:25.464212+00:00",
+  "timestamp": "2026-11-04T19:58:37.585744+00:00",
   "total_scenarios": 30,
   "aggregate_metrics": {
     "total_scenarios": 30,
@@ -33,8 +33,8 @@
       "micro_precision_at_k": 0.5185,
       "micro_recall_at_k": 0.8,
       "micro_f1": 0.6292,
-      "mrr": 0.7,
-      "ndcg_at_k": 0.7169,
+      "mrr": 0.7167,
+      "ndcg_at_k": 0.7318,
       "irrelevant_retrieval_rate": 0.3056
     },
     "retrieval_by_strategy": {
@@ -73,8 +73,8 @@
         "micro_precision_at_k": 0.5185,
         "micro_recall_at_k": 0.8,
         "micro_f1": 0.6292,
-        "mrr": 0.7,
-        "ndcg_at_k": 0.7169,
+        "mrr": 0.7167,
+        "ndcg_at_k": 0.7318,
         "irrelevant_retrieval_rate": 0.3056
       },
       "ML-Enhanced (Reranked)": {
@@ -266,45 +266,135 @@
       "n_clusters": 10,
       "cluster_size": 3,
       "cluster_mean_diff": 0.7,
-      "cluster_std_error": 0.105,
+      "cluster_std_error": 0.1048,
       "confidence_interval_95": [
-        0.463,
-        0.937
+        0.4629,
+        0.9371
       ],
       "t_statistic": 6.678,
       "degrees_of_freedom": 9,
       "is_statistically_significant": true,
-      "notes": "Cluster-stratified across 10 categories (cluster size=3, df=9). Accounts for potential intra-category correlation. Between-category SE=0.105. Difference is statistically significant (p < 0.05)."
+      "notes": "Cluster-stratified across 10 categories (cluster size=3, df=9). Direction defined as Condition C minus Condition A (C - A). Exploratory and conditional on treating the 10 categories as independent clusters; these results do not establish general performance across real-world agent tasks, and statistical significance does not constitute proof of general superiority. Between-category SE=0.1048, t=6.678. Difference is statistically significant (p < 0.05).",
+      "category_differences": [
+        0.6667,
+        1.0,
+        0.6667,
+        1.0,
+        0.3333,
+        0.6667,
+        0.0,
+        1.0,
+        0.6667,
+        1.0
+      ]
     },
     "cluster_partial_success": {
       "metric_name": "Partial Credit Score (Cluster-Stratified, df=9)",
       "n_clusters": 10,
       "cluster_size": 3,
-      "cluster_mean_diff": 0.817,
-      "cluster_std_error": 0.09,
+      "cluster_mean_diff": 0.8167,
+      "cluster_std_error": 0.0899,
       "confidence_interval_95": [
-        0.613,
+        0.6133,
         1.02
       ],
       "t_statistic": 9.084,
       "degrees_of_freedom": 9,
       "is_statistically_significant": true,
-      "notes": "Cluster-stratified across 10 categories (cluster size=3, df=9). Accounts for potential intra-category correlation. Between-category SE=0.090. Difference is statistically significant (p < 0.05)."
+      "notes": "Cluster-stratified across 10 categories (cluster size=3, df=9). Direction defined as Condition C minus Condition A (C - A). Exploratory and conditional on treating the 10 categories as independent clusters; these results do not establish general performance across real-world agent tasks, and statistical significance does not constitute proof of general superiority. Between-category SE=0.0899, t=9.084. Difference is statistically significant (p < 0.05).",
+      "category_differences": [
+        0.8833,
+        1.0,
+        0.9667,
+        1.0,
+        0.3917,
+        0.8833,
+        0.2,
+        1.0,
+        0.8417,
+        1.0
+      ]
     },
     "cluster_tokens": {
-      "metric_name": "Total Tokens Consumed (Cluster-Stratified, df=9)",
+      "metric_name": "Total Tokens Consumed Overhead (Cluster-Stratified, df=9)",
       "n_clusters": 10,
       "cluster_size": 3,
-      "cluster_mean_diff": 371.833,
-      "cluster_std_error": 101.17,
+      "cluster_mean_diff": 371.8333,
+      "cluster_std_error": 101.1697,
       "confidence_interval_95": [
-        142.987,
-        600.679
+        142.9875,
+        600.6792
       ],
       "t_statistic": 3.675,
       "degrees_of_freedom": 9,
       "is_statistically_significant": true,
-      "notes": "Cluster-stratified across 10 categories (cluster size=3, df=9). Accounts for potential intra-category correlation. Between-category SE=101.170. Difference is statistically significant (p < 0.05)."
+      "notes": "Cluster-stratified across 10 categories (cluster size=3, df=9). Direction defined as Condition C minus Condition A (C - A). Exploratory and conditional on treating the 10 categories as independent clusters; these results do not establish general performance across real-world agent tasks, and statistical significance does not constitute proof of general superiority. Between-category SE=101.1697, t=3.675. Difference is statistically significant (p < 0.05).",
+      "category_differences": [
+        276.3333,
+        361.0,
+        350.6667,
+        210.0,
+        239.0,
+        286.0,
+        157.3333,
+        288.3333,
+        1266.0,
+        283.6667
+      ]
+    },
+    "cluster_repeated_explanations": {
+      "metric_name": "Repeated Explanations Needed (Cluster-Stratified, df=9)",
+      "n_clusters": 10,
+      "cluster_size": 3,
+      "cluster_mean_diff": -3.1333,
+      "cluster_std_error": 0.4771,
+      "confidence_interval_95": [
+        -4.2126,
+        -2.0541
+      ],
+      "t_statistic": -6.567,
+      "degrees_of_freedom": 9,
+      "is_statistically_significant": true,
+      "notes": "Cluster-stratified across 10 categories (cluster size=3, df=9). Direction defined as Condition C minus Condition A (C - A). Exploratory and conditional on treating the 10 categories as independent clusters; these results do not establish general performance across real-world agent tasks, and statistical significance does not constitute proof of general superiority. Between-category SE=0.4771, t=-6.567. Difference is statistically significant (p < 0.05).",
+      "category_differences": [
+        -3.3333,
+        -4.3333,
+        -4.6667,
+        -4.3333,
+        -0.3333,
+        -3.3333,
+        -0.6667,
+        -3.6667,
+        -2.6667,
+        -4.0
+      ]
+    },
+    "cluster_decisions_maintained": {
+      "metric_name": "Decisions Maintained (Cluster-Stratified, df=9)",
+      "n_clusters": 10,
+      "cluster_size": 3,
+      "cluster_mean_diff": 0.8333,
+      "cluster_std_error": 0.1427,
+      "confidence_interval_95": [
+        0.5105,
+        1.1562
+      ],
+      "t_statistic": 5.839,
+      "degrees_of_freedom": 9,
+      "is_statistically_significant": true,
+      "notes": "Cluster-stratified across 10 categories (cluster size=3, df=9). Direction defined as Condition C minus Condition A (C - A). Exploratory and conditional on treating the 10 categories as independent clusters; these results do not establish general performance across real-world agent tasks, and statistical significance does not constitute proof of general superiority. Between-category SE=0.1427, t=5.839. Difference is statistically significant (p < 0.05).",
+      "category_differences": [
+        1.0,
+        1.3333,
+        1.0,
+        1.0,
+        0.0,
+        1.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0
+      ]
     },
     "category_summaries": {
       "TASK_CONTINUATION": {
@@ -643,7 +733,7 @@
           "Missing expected decision: RS256 algorithm for JWT signing",
           "Violated technical constraint: RSA 4096-bit keypair"
         ],
-        "execution_time_ms": 0.13,
+        "execution_time_ms": 0.14,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -681,7 +771,7 @@
         "missing_details_notes": [
           "Omitted fact: bcrypt with work factor 12"
         ],
-        "execution_time_ms": 13.66,
+        "execution_time_ms": 14.29,
         "error_message": null
       },
       "without_brain": {
@@ -721,7 +811,7 @@
           "Missing expected decision: RS256 algorithm for JWT signing",
           "Violated technical constraint: RSA 4096-bit keypair"
         ],
-        "execution_time_ms": 0.13,
+        "execution_time_ms": 0.14,
         "error_message": null
       },
       "with_brain": {
@@ -759,7 +849,7 @@
         "missing_details_notes": [
           "Omitted fact: bcrypt with work factor 12"
         ],
-        "execution_time_ms": 13.66,
+        "execution_time_ms": 14.29,
         "error_message": null
       },
       "token_delta": 211,
@@ -851,7 +941,7 @@
           "Missing expected decision: Stripe Checkout Sessions in subscription mode",
           "Violated technical constraint: currency USD"
         ],
-        "execution_time_ms": 0.1,
+        "execution_time_ms": 0.11,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -887,7 +977,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 12.28,
+        "execution_time_ms": 14.16,
         "error_message": null
       },
       "without_brain": {
@@ -927,7 +1017,7 @@
           "Missing expected decision: Stripe Checkout Sessions in subscription mode",
           "Violated technical constraint: currency USD"
         ],
-        "execution_time_ms": 0.1,
+        "execution_time_ms": 0.11,
         "error_message": null
       },
       "with_brain": {
@@ -963,7 +1053,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 12.28,
+        "execution_time_ms": 14.16,
         "error_message": null
       },
       "token_delta": 372,
@@ -1008,7 +1098,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.17,
+        "execution_time_ms": 0.18,
         "error_message": null
       }
     },
@@ -1057,7 +1147,7 @@
           "Violated technical constraint: Python 3.12",
           "Violated technical constraint: poetry"
         ],
-        "execution_time_ms": 0.09,
+        "execution_time_ms": 0.1,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -1093,7 +1183,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.93,
+        "execution_time_ms": 9.36,
         "error_message": null
       },
       "without_brain": {
@@ -1135,7 +1225,7 @@
           "Violated technical constraint: Python 3.12",
           "Violated technical constraint: poetry"
         ],
-        "execution_time_ms": 0.09,
+        "execution_time_ms": 0.1,
         "error_message": null
       },
       "with_brain": {
@@ -1171,7 +1261,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.93,
+        "execution_time_ms": 9.36,
         "error_message": null
       },
       "token_delta": 246,
@@ -1265,7 +1355,7 @@
           "Missing expected decision: Memcached lacks replication",
           "Violated technical constraint: 3-node replica set"
         ],
-        "execution_time_ms": 0.09,
+        "execution_time_ms": 0.1,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -1301,7 +1391,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 15.85,
+        "execution_time_ms": 17.27,
         "error_message": null
       },
       "without_brain": {
@@ -1343,7 +1433,7 @@
           "Missing expected decision: Memcached lacks replication",
           "Violated technical constraint: 3-node replica set"
         ],
-        "execution_time_ms": 0.09,
+        "execution_time_ms": 0.1,
         "error_message": null
       },
       "with_brain": {
@@ -1379,7 +1469,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 15.85,
+        "execution_time_ms": 17.27,
         "error_message": null
       },
       "token_delta": 621,
@@ -1424,7 +1514,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.21,
+        "execution_time_ms": 0.16,
         "error_message": null
       }
     },
@@ -1472,7 +1562,7 @@
           "Missing expected decision: Use PostgreSQL 16 because ACID transactions",
           "Violated technical constraint: foreign key guarantees"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.1,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -1508,7 +1598,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.89,
+        "execution_time_ms": 9.05,
         "error_message": null
       },
       "without_brain": {
@@ -1549,7 +1639,7 @@
           "Missing expected decision: Use PostgreSQL 16 because ACID transactions",
           "Violated technical constraint: foreign key guarantees"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.1,
         "error_message": null
       },
       "with_brain": {
@@ -1585,7 +1675,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.89,
+        "execution_time_ms": 9.05,
         "error_message": null
       },
       "token_delta": 233,
@@ -1630,7 +1720,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.13,
+        "execution_time_ms": 0.14,
         "error_message": null
       }
     },
@@ -1678,7 +1768,7 @@
           "Missing expected decision: Standardize on Protocol Buffers v3",
           "Violated technical constraint: Protocol Buffers v3"
         ],
-        "execution_time_ms": 0.12,
+        "execution_time_ms": 0.08,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -1714,7 +1804,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.8,
+        "execution_time_ms": 10.28,
         "error_message": null
       },
       "without_brain": {
@@ -1755,7 +1845,7 @@
           "Missing expected decision: Standardize on Protocol Buffers v3",
           "Violated technical constraint: Protocol Buffers v3"
         ],
-        "execution_time_ms": 0.12,
+        "execution_time_ms": 0.08,
         "error_message": null
       },
       "with_brain": {
@@ -1791,7 +1881,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.8,
+        "execution_time_ms": 10.28,
         "error_message": null
       },
       "token_delta": 229,
@@ -1924,7 +2014,7 @@
         "missing_details_notes": [
           "Constraint not explicitly verified: SQLAlchemy Core"
         ],
-        "execution_time_ms": 15.72,
+        "execution_time_ms": 21.17,
         "error_message": null
       },
       "without_brain": {
@@ -2005,7 +2095,7 @@
         "missing_details_notes": [
           "Constraint not explicitly verified: SQLAlchemy Core"
         ],
-        "execution_time_ms": 15.72,
+        "execution_time_ms": 21.17,
         "error_message": null
       },
       "token_delta": 588,
@@ -2050,7 +2140,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.16,
+        "execution_time_ms": 0.17,
         "error_message": null
       }
     },
@@ -2099,7 +2189,7 @@
           "Violated technical constraint: 10MB",
           "Violated technical constraint: 100 requests per minute"
         ],
-        "execution_time_ms": 0.07,
+        "execution_time_ms": 0.12,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -2135,7 +2225,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.11,
+        "execution_time_ms": 12.97,
         "error_message": null
       },
       "without_brain": {
@@ -2177,7 +2267,7 @@
           "Violated technical constraint: 10MB",
           "Violated technical constraint: 100 requests per minute"
         ],
-        "execution_time_ms": 0.07,
+        "execution_time_ms": 0.12,
         "error_message": null
       },
       "with_brain": {
@@ -2213,7 +2303,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.11,
+        "execution_time_ms": 12.97,
         "error_message": null
       },
       "token_delta": 225,
@@ -2258,7 +2348,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.11,
+        "execution_time_ms": 0.19,
         "error_message": null
       }
     },
@@ -2306,7 +2396,7 @@
           "Violated technical constraint: AES-256-GCM",
           "Violated technical constraint: CBC mode is strictly prohibited"
         ],
-        "execution_time_ms": 0.07,
+        "execution_time_ms": 0.11,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -2342,7 +2432,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.28,
+        "execution_time_ms": 10.99,
         "error_message": null
       },
       "without_brain": {
@@ -2383,7 +2473,7 @@
           "Violated technical constraint: AES-256-GCM",
           "Violated technical constraint: CBC mode is strictly prohibited"
         ],
-        "execution_time_ms": 0.07,
+        "execution_time_ms": 0.11,
         "error_message": null
       },
       "with_brain": {
@@ -2419,7 +2509,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.28,
+        "execution_time_ms": 10.99,
         "error_message": null
       },
       "token_delta": 239,
@@ -2464,7 +2554,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.1,
+        "execution_time_ms": 0.12,
         "error_message": null
       }
     },
@@ -2512,7 +2602,7 @@
           "Missing expected decision: gRPC protobuf on port 9090",
           "Violated technical constraint: port 9090"
         ],
-        "execution_time_ms": 0.1,
+        "execution_time_ms": 0.09,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -2548,7 +2638,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 7.93,
+        "execution_time_ms": 9.59,
         "error_message": null
       },
       "without_brain": {
@@ -2589,7 +2679,7 @@
           "Missing expected decision: gRPC protobuf on port 9090",
           "Violated technical constraint: port 9090"
         ],
-        "execution_time_ms": 0.1,
+        "execution_time_ms": 0.09,
         "error_message": null
       },
       "with_brain": {
@@ -2625,7 +2715,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 7.93,
+        "execution_time_ms": 9.59,
         "error_message": null
       },
       "token_delta": 54,
@@ -2670,7 +2760,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 1,
         "missing_details_notes": [],
-        "execution_time_ms": 0.16,
+        "execution_time_ms": 0.14,
         "error_message": null
       }
     },
@@ -2719,7 +2809,7 @@
           "Violated technical constraint: 15-minute",
           "Violated technical constraint: 8-hour"
         ],
-        "execution_time_ms": 0.09,
+        "execution_time_ms": 0.1,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -2755,7 +2845,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 11.46,
+        "execution_time_ms": 12.95,
         "error_message": null
       },
       "without_brain": {
@@ -2797,7 +2887,7 @@
           "Violated technical constraint: 15-minute",
           "Violated technical constraint: 8-hour"
         ],
-        "execution_time_ms": 0.09,
+        "execution_time_ms": 0.1,
         "error_message": null
       },
       "with_brain": {
@@ -2833,7 +2923,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 11.46,
+        "execution_time_ms": 12.95,
         "error_message": null
       },
       "token_delta": 291,
@@ -2926,7 +3016,7 @@
           "Missing expected decision: stream via Fluentd socket on port 24224",
           "Violated technical constraint: port 24224"
         ],
-        "execution_time_ms": 0.09,
+        "execution_time_ms": 0.1,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -2962,7 +3052,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 11.32,
+        "execution_time_ms": 17.54,
         "error_message": null
       },
       "without_brain": {
@@ -3003,7 +3093,7 @@
           "Missing expected decision: stream via Fluentd socket on port 24224",
           "Violated technical constraint: port 24224"
         ],
-        "execution_time_ms": 0.09,
+        "execution_time_ms": 0.1,
         "error_message": null
       },
       "with_brain": {
@@ -3039,7 +3129,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 11.32,
+        "execution_time_ms": 17.54,
         "error_message": null
       },
       "token_delta": 285,
@@ -3084,7 +3174,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.13,
+        "execution_time_ms": 0.14,
         "error_message": null
       }
     },
@@ -3127,7 +3217,7 @@
         "conflict_handled_correctly": false,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.07,
+        "execution_time_ms": 0.13,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -3163,7 +3253,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 11.94,
+        "execution_time_ms": 16.75,
         "error_message": null
       },
       "without_brain": {
@@ -3199,7 +3289,7 @@
         "conflict_handled_correctly": false,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.07,
+        "execution_time_ms": 0.13,
         "error_message": null
       },
       "with_brain": {
@@ -3235,7 +3325,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 11.94,
+        "execution_time_ms": 16.75,
         "error_message": null
       },
       "token_delta": 344,
@@ -3280,7 +3370,7 @@
         "conflict_handled_correctly": false,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.09,
+        "execution_time_ms": 0.13,
         "error_message": null
       }
     },
@@ -3323,7 +3413,7 @@
         "conflict_handled_correctly": false,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.09,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -3359,7 +3449,7 @@
         "conflict_handled_correctly": false,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.57,
+        "execution_time_ms": 13.36,
         "error_message": null
       },
       "without_brain": {
@@ -3395,7 +3485,7 @@
         "conflict_handled_correctly": false,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.09,
         "error_message": null
       },
       "with_brain": {
@@ -3431,7 +3521,7 @@
         "conflict_handled_correctly": false,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.57,
+        "execution_time_ms": 13.36,
         "error_message": null
       },
       "token_delta": 147,
@@ -3522,7 +3612,7 @@
           "Missing expected fact: Redis on port 6379",
           "Missing expected fact: PostgreSQL 16 on port 5432"
         ],
-        "execution_time_ms": 0.07,
+        "execution_time_ms": 0.1,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -3560,7 +3650,7 @@
         "missing_details_notes": [
           "Omitted fact: PostgreSQL 16 on port 5432"
         ],
-        "execution_time_ms": 11.68,
+        "execution_time_ms": 23.6,
         "error_message": null
       },
       "without_brain": {
@@ -3599,7 +3689,7 @@
           "Missing expected fact: Redis on port 6379",
           "Missing expected fact: PostgreSQL 16 on port 5432"
         ],
-        "execution_time_ms": 0.07,
+        "execution_time_ms": 0.1,
         "error_message": null
       },
       "with_brain": {
@@ -3637,7 +3727,7 @@
         "missing_details_notes": [
           "Omitted fact: PostgreSQL 16 on port 5432"
         ],
-        "execution_time_ms": 11.68,
+        "execution_time_ms": 23.6,
         "error_message": null
       },
       "token_delta": 226,
@@ -3682,7 +3772,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.1,
+        "execution_time_ms": 0.12,
         "error_message": null
       }
     },
@@ -3730,7 +3820,7 @@
           "Missing expected decision: Select Apache Kafka with 3 partitions per topic",
           "Violated technical constraint: 3 partitions per topic"
         ],
-        "execution_time_ms": 0.1,
+        "execution_time_ms": 0.21,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -3766,7 +3856,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 12.16,
+        "execution_time_ms": 30.9,
         "error_message": null
       },
       "without_brain": {
@@ -3807,7 +3897,7 @@
           "Missing expected decision: Select Apache Kafka with 3 partitions per topic",
           "Violated technical constraint: 3 partitions per topic"
         ],
-        "execution_time_ms": 0.1,
+        "execution_time_ms": 0.21,
         "error_message": null
       },
       "with_brain": {
@@ -3843,7 +3933,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 12.16,
+        "execution_time_ms": 30.9,
         "error_message": null
       },
       "token_delta": 408,
@@ -3888,7 +3978,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.17,
+        "execution_time_ms": 0.33,
         "error_message": null
       }
     },
@@ -3935,7 +4025,7 @@
           "Missing expected decision: use bind parameters to avoid SQL injection",
           "Violated technical constraint: bind parameters"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.17,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -3973,7 +4063,7 @@
         "missing_details_notes": [
           "Omitted fact: parameterized queries"
         ],
-        "execution_time_ms": 9.04,
+        "execution_time_ms": 22.4,
         "error_message": null
       },
       "without_brain": {
@@ -4013,7 +4103,7 @@
           "Missing expected decision: use bind parameters to avoid SQL injection",
           "Violated technical constraint: bind parameters"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.17,
         "error_message": null
       },
       "with_brain": {
@@ -4051,7 +4141,7 @@
         "missing_details_notes": [
           "Omitted fact: parameterized queries"
         ],
-        "execution_time_ms": 9.04,
+        "execution_time_ms": 22.4,
         "error_message": null
       },
       "token_delta": 208,
@@ -4096,7 +4186,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.14,
+        "execution_time_ms": 0.35,
         "error_message": null
       }
     },
@@ -4144,7 +4234,7 @@
           "Missing expected decision: Staging cluster URL is https://staging.internal:8443",
           "Violated technical constraint: TLS 1.3"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.16,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -4180,7 +4270,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.5,
+        "execution_time_ms": 18.87,
         "error_message": null
       },
       "without_brain": {
@@ -4221,7 +4311,7 @@
           "Missing expected decision: Staging cluster URL is https://staging.internal:8443",
           "Violated technical constraint: TLS 1.3"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.16,
         "error_message": null
       },
       "with_brain": {
@@ -4257,7 +4347,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.5,
+        "execution_time_ms": 18.87,
         "error_message": null
       },
       "token_delta": 242,
@@ -4302,7 +4392,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.13,
+        "execution_time_ms": 0.23,
         "error_message": null
       }
     },
@@ -4349,7 +4439,7 @@
           "Missing expected fact: record ID 52,143",
           "Violated technical constraint: UUID v7"
         ],
-        "execution_time_ms": 0.09,
+        "execution_time_ms": 0.13,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -4388,7 +4478,7 @@
           "Omitted fact: Batches 1 through 5",
           "Omitted fact: record ID 52,143"
         ],
-        "execution_time_ms": 9.24,
+        "execution_time_ms": 15.74,
         "error_message": null
       },
       "without_brain": {
@@ -4428,7 +4518,7 @@
           "Missing expected fact: record ID 52,143",
           "Violated technical constraint: UUID v7"
         ],
-        "execution_time_ms": 0.09,
+        "execution_time_ms": 0.13,
         "error_message": null
       },
       "with_brain": {
@@ -4467,7 +4557,7 @@
           "Omitted fact: Batches 1 through 5",
           "Omitted fact: record ID 52,143"
         ],
-        "execution_time_ms": 9.24,
+        "execution_time_ms": 15.74,
         "error_message": null
       },
       "token_delta": 163,
@@ -4512,7 +4602,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.13,
+        "execution_time_ms": 0.36,
         "error_message": null
       }
     },
@@ -4558,7 +4648,7 @@
           "Missing expected fact: documents 1 through 141",
           "Missing expected fact: Document 142 timed out"
         ],
-        "execution_time_ms": 0.09,
+        "execution_time_ms": 0.14,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -4597,7 +4687,7 @@
           "Omitted fact: documents 1 through 141",
           "Omitted fact: Document 142 timed out"
         ],
-        "execution_time_ms": 9.2,
+        "execution_time_ms": 12.4,
         "error_message": null
       },
       "without_brain": {
@@ -4636,7 +4726,7 @@
           "Missing expected fact: documents 1 through 141",
           "Missing expected fact: Document 142 timed out"
         ],
-        "execution_time_ms": 0.09,
+        "execution_time_ms": 0.14,
         "error_message": null
       },
       "with_brain": {
@@ -4675,7 +4765,7 @@
           "Omitted fact: documents 1 through 141",
           "Omitted fact: Document 142 timed out"
         ],
-        "execution_time_ms": 9.2,
+        "execution_time_ms": 12.4,
         "error_message": null
       },
       "token_delta": 149,
@@ -4720,7 +4810,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.11,
+        "execution_time_ms": 0.21,
         "error_message": null
       }
     },
@@ -4766,7 +4856,7 @@
           "Missing expected fact: 004_add_indexes failed",
           "Violated technical constraint: Alembic migrations"
         ],
-        "execution_time_ms": 0.07,
+        "execution_time_ms": 0.11,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -4804,7 +4894,7 @@
         "missing_details_notes": [
           "Omitted fact: 004_add_indexes failed"
         ],
-        "execution_time_ms": 8.4,
+        "execution_time_ms": 14.04,
         "error_message": null
       },
       "without_brain": {
@@ -4843,7 +4933,7 @@
           "Missing expected fact: 004_add_indexes failed",
           "Violated technical constraint: Alembic migrations"
         ],
-        "execution_time_ms": 0.07,
+        "execution_time_ms": 0.11,
         "error_message": null
       },
       "with_brain": {
@@ -4881,7 +4971,7 @@
         "missing_details_notes": [
           "Omitted fact: 004_add_indexes failed"
         ],
-        "execution_time_ms": 8.4,
+        "execution_time_ms": 14.04,
         "error_message": null
       },
       "token_delta": 160,
@@ -4926,7 +5016,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.09,
+        "execution_time_ms": 0.14,
         "error_message": null
       }
     },
@@ -4974,7 +5064,7 @@
           "Missing expected decision: verify HMAC-SHA256 signature",
           "Violated technical constraint: whsec_prod_xyz"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.17,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -5010,7 +5100,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 11.72,
+        "execution_time_ms": 21.27,
         "error_message": null
       },
       "without_brain": {
@@ -5051,7 +5141,7 @@
           "Missing expected decision: verify HMAC-SHA256 signature",
           "Violated technical constraint: whsec_prod_xyz"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.17,
         "error_message": null
       },
       "with_brain": {
@@ -5087,7 +5177,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 11.72,
+        "execution_time_ms": 21.27,
         "error_message": null
       },
       "token_delta": 396,
@@ -5132,7 +5222,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.13,
+        "execution_time_ms": 0.26,
         "error_message": null
       }
     },
@@ -5179,7 +5269,7 @@
           "Missing expected decision: mTLS client certificate path",
           "Violated technical constraint: /etc/ssl/private/mesh-client.key"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.16,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -5215,7 +5305,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.61,
+        "execution_time_ms": 17.44,
         "error_message": null
       },
       "without_brain": {
@@ -5255,7 +5345,7 @@
           "Missing expected decision: mTLS client certificate path",
           "Violated technical constraint: /etc/ssl/private/mesh-client.key"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.16,
         "error_message": null
       },
       "with_brain": {
@@ -5291,7 +5381,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.61,
+        "execution_time_ms": 17.44,
         "error_message": null
       },
       "token_delta": 232,
@@ -5336,7 +5426,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.11,
+        "execution_time_ms": 0.23,
         "error_message": null
       }
     },
@@ -5384,7 +5474,7 @@
           "Missing expected decision: PostHog host https://posthog.internal",
           "Violated technical constraint: ph_prod_8829"
         ],
-        "execution_time_ms": 0.07,
+        "execution_time_ms": 0.16,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -5420,7 +5510,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.25,
+        "execution_time_ms": 12.67,
         "error_message": null
       },
       "without_brain": {
@@ -5461,7 +5551,7 @@
           "Missing expected decision: PostHog host https://posthog.internal",
           "Violated technical constraint: ph_prod_8829"
         ],
-        "execution_time_ms": 0.07,
+        "execution_time_ms": 0.16,
         "error_message": null
       },
       "with_brain": {
@@ -5497,7 +5587,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.25,
+        "execution_time_ms": 12.67,
         "error_message": null
       },
       "token_delta": 237,
@@ -5542,7 +5632,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.12,
+        "execution_time_ms": 0.52,
         "error_message": null
       }
     },
@@ -5589,7 +5679,7 @@
           "Missing expected decision: rate limiter threshold for public search",
           "Violated technical constraint: 42 requests per minute"
         ],
-        "execution_time_ms": 0.18,
+        "execution_time_ms": 0.2,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -5625,7 +5715,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 47.24,
+        "execution_time_ms": 102.83,
         "error_message": null
       },
       "without_brain": {
@@ -5665,7 +5755,7 @@
           "Missing expected decision: rate limiter threshold for public search",
           "Violated technical constraint: 42 requests per minute"
         ],
-        "execution_time_ms": 0.18,
+        "execution_time_ms": 0.2,
         "error_message": null
       },
       "with_brain": {
@@ -5701,7 +5791,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 47.24,
+        "execution_time_ms": 102.83,
         "error_message": null
       },
       "token_delta": 1109,
@@ -5709,9 +5799,9 @@
       "task_continuation_delta": 1,
       "partial_score_delta": 1.0,
       "repeated_explanations_avoided": 3,
-      "retrieval_precision_at_k": 0.2,
-      "retrieval_recall_at_k": 0.3333,
-      "retrieval_f1": 0.25,
+      "retrieval_precision_at_k": 0.0,
+      "retrieval_recall_at_k": 0.0,
+      "retrieval_f1": 0.0,
       "conflict_handling_delta": 0,
       "condition_b_raw_history": {
         "scenario_id": "SCENARIO_09A_NEEDLE_IN_HAYSTACK",
@@ -5746,7 +5836,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.53,
+        "execution_time_ms": 0.5,
         "error_message": null
       }
     },
@@ -5794,7 +5884,7 @@
           "Missing expected decision: Password hashing salt length is configured to 32 bytes",
           "Violated technical constraint: Argon2id"
         ],
-        "execution_time_ms": 0.4,
+        "execution_time_ms": 0.42,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -5833,7 +5923,7 @@
           "Omitted fact: Argon2id",
           "Constraint not explicitly verified: Argon2id"
         ],
-        "execution_time_ms": 49.11,
+        "execution_time_ms": 89.28,
         "error_message": null
       },
       "without_brain": {
@@ -5874,7 +5964,7 @@
           "Missing expected decision: Password hashing salt length is configured to 32 bytes",
           "Violated technical constraint: Argon2id"
         ],
-        "execution_time_ms": 0.4,
+        "execution_time_ms": 0.42,
         "error_message": null
       },
       "with_brain": {
@@ -5913,7 +6003,7 @@
           "Omitted fact: Argon2id",
           "Constraint not explicitly verified: Argon2id"
         ],
-        "execution_time_ms": 49.11,
+        "execution_time_ms": 89.28,
         "error_message": null
       },
       "token_delta": 1175,
@@ -5958,7 +6048,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.63,
+        "execution_time_ms": 0.96,
         "error_message": null
       }
     },
@@ -6005,7 +6095,7 @@
           "Missing expected decision: endpoint runs on private internal port 9876",
           "Violated technical constraint: port 9876"
         ],
-        "execution_time_ms": 0.2,
+        "execution_time_ms": 0.4,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -6041,7 +6131,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 53.86,
+        "execution_time_ms": 89.81,
         "error_message": null
       },
       "without_brain": {
@@ -6081,7 +6171,7 @@
           "Missing expected decision: endpoint runs on private internal port 9876",
           "Violated technical constraint: port 9876"
         ],
-        "execution_time_ms": 0.2,
+        "execution_time_ms": 0.4,
         "error_message": null
       },
       "with_brain": {
@@ -6117,7 +6207,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 53.86,
+        "execution_time_ms": 89.81,
         "error_message": null
       },
       "token_delta": 1514,
@@ -6162,7 +6252,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.39,
+        "execution_time_ms": 0.8,
         "error_message": null
       }
     },
@@ -6210,7 +6300,7 @@
           "Missing expected decision: OAuth2 Bearer with Ed25519 signatures",
           "Violated technical constraint: Ed25519"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.15,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -6246,7 +6336,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 10.45,
+        "execution_time_ms": 16.83,
         "error_message": null
       },
       "without_brain": {
@@ -6287,7 +6377,7 @@
           "Missing expected decision: OAuth2 Bearer with Ed25519 signatures",
           "Violated technical constraint: Ed25519"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.15,
         "error_message": null
       },
       "with_brain": {
@@ -6323,7 +6413,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 10.45,
+        "execution_time_ms": 16.83,
         "error_message": null
       },
       "token_delta": 294,
@@ -6368,7 +6458,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 1,
         "missing_details_notes": [],
-        "execution_time_ms": 0.22,
+        "execution_time_ms": 0.29,
         "error_message": null
       }
     },
@@ -6416,7 +6506,7 @@
           "Missing expected decision: Python 3.12 on Debian bookworm",
           "Violated technical constraint: Python 3.12"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.12,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -6452,7 +6542,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.97,
+        "execution_time_ms": 12.72,
         "error_message": null
       },
       "without_brain": {
@@ -6493,7 +6583,7 @@
           "Missing expected decision: Python 3.12 on Debian bookworm",
           "Violated technical constraint: Python 3.12"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.12,
         "error_message": null
       },
       "with_brain": {
@@ -6529,7 +6619,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 8.97,
+        "execution_time_ms": 12.72,
         "error_message": null
       },
       "token_delta": 233,
@@ -6574,7 +6664,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 1,
         "missing_details_notes": [],
-        "execution_time_ms": 0.14,
+        "execution_time_ms": 0.25,
         "error_message": null
       }
     },
@@ -6622,7 +6712,7 @@
           "Missing expected decision: served via CloudFront CDN distribution",
           "Violated technical constraint: https://cdn.example.com"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.09,
         "error_message": null
       },
       "condition_c_ai_brain": {
@@ -6658,7 +6748,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 10.69,
+        "execution_time_ms": 18.82,
         "error_message": null
       },
       "without_brain": {
@@ -6699,7 +6789,7 @@
           "Missing expected decision: served via CloudFront CDN distribution",
           "Violated technical constraint: https://cdn.example.com"
         ],
-        "execution_time_ms": 0.08,
+        "execution_time_ms": 0.09,
         "error_message": null
       },
       "with_brain": {
@@ -6735,7 +6825,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 10.69,
+        "execution_time_ms": 18.82,
         "error_message": null
       },
       "token_delta": 324,
@@ -6780,7 +6870,7 @@
         "conflict_handled_correctly": true,
         "stale_memories_used_count": 0,
         "missing_details_notes": [],
-        "execution_time_ms": 0.14,
+        "execution_time_ms": 0.2,
         "error_message": null
       }
     }

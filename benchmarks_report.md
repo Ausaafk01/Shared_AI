@@ -1,6 +1,6 @@
 # AI Brain — Phase 4 System Benchmarking & Comparative Evaluation Report
 
-**Generated**: 2026-11-04 19:38:25 UTC
+**Generated**: 2026-11-04 19:58:37 UTC
 
 **Total Scenarios Evaluated**: 30 realistic multi-session test scenarios (3 per category across 10 categories)
 
@@ -84,11 +84,38 @@ While the suite contains 30 scenarios, they are organized into **10 distinct sce
 
 ### Cluster-Stratified Category Analysis (df = 9, Critical t = 2.262)
 
-| Clustered Metric | Mean Diff (C - A) | Cluster Std Error | 95% Confidence Interval | t-Statistic | Significant (p<0.05) |
-|---|---:|---:|:---:|---:|:---:|
-| **Task Continuation Success (Cluster-Stratified, df=9)** | +0.700 | 0.105 | [0.46, 0.94] | 6.68 | Yes |
-| **Partial Credit Score (Cluster-Stratified, df=9)** | +0.817 | 0.090 | [0.61, 1.02] | 9.08 | Yes |
-| **Total Tokens Consumed (Cluster-Stratified, df=9)** | +371.833 | 101.170 | [142.99, 600.68] | 3.68 | Yes |
+> [!WARNING]
+> **Statistical Inference Qualification**: The category-level t-tests, p-values, and confidence intervals below are **exploratory and conditional on treating the ten categories as independent clusters**. Because the 30 benchmark scenarios represent curated software engineering tasks rather than a random sample of real-world agent tasks, **these results do not establish general performance across real-world agent tasks, and statistical significance must not be interpreted as proof of general superiority**.
+
+> [!NOTE]
+> **Directionality & Token Overhead Interpretation**: Subtraction direction is explicitly defined as **Condition C minus Condition A ($C - A$)**. For tokens consumed, the positive difference (+371.83 tokens) means AI Brain consumes more tokens than Cold Start. This reflects **additional token overhead** from context injection, **not a performance improvement**.
+
+
+| Clustered Metric | Mean Diff (C - A) | Cluster Std Error | 95% Confidence Interval | t-Statistic | Significant (p<0.05) | Interpretation |
+|---|---:|---:|:---:|---:|:---:|---|
+| **Task Continuation Success (Cluster-Stratified, df=9)** | +0.700 | 0.105 | [0.46, 0.94] | 6.68 | Yes | Higher is better (Task Pass Rate) |
+| **Partial Credit Score (Cluster-Stratified, df=9)** | +0.817 | 0.090 | [0.61, 1.02] | 9.08 | Yes | Higher is better (Partial Credit) |
+| **Total Tokens Consumed Overhead (Cluster-Stratified, df=9)** | +371.833 | 101.170 | [142.99, 600.68] | 3.68 | Yes | Lower is better (+371.83 token overhead) |
+| **Repeated Explanations Needed (Cluster-Stratified, df=9)** | -3.133 | 0.477 | [-4.21, -2.05] | -6.57 | Yes | Lower is better (Explanations reduced) |
+| **Decisions Maintained (Cluster-Stratified, df=9)** | +0.833 | 0.143 | [0.51, 1.16] | 5.84 | Yes | Higher is better (Decisions preserved) |
+
+### Underlying Category-Level Paired Differences (Condition C minus Condition A)
+
+The table below exposes the ten category-level cluster means and paired differences ($D_k = C_k - A_k$) directly used to compute the summary statistics:
+
+| Category ($k$) | Task Success Diff | Partial Credit Diff | Token Overhead ($C - A$) | Explanations Diff ($C - A$) | Decisions Diff ($C - A$) |
+|---|---:|---:|---:|---:|---:|
+
+| **`TASK_CONTINUATION`** | +0.667 | +0.883 | +276.3 | -3.333 | +1.000 |
+| **`ARCHITECTURAL_DECISION`** | +1.000 | +1.000 | +361.0 | -4.333 | +1.333 |
+| **`TECHNICAL_CONSTRAINTS`** | +0.667 | +0.967 | +350.7 | -4.667 | +1.000 |
+| **`UPDATED_REQUIREMENTS`** | +1.000 | +1.000 | +210.0 | -4.333 | +1.000 |
+| **`CONTRADICTORY_CLAIMS`** | +0.333 | +0.392 | +239.0 | -0.333 | +0.000 |
+| **`AGENT_SWITCHING`** | +0.667 | +0.883 | +286.0 | -3.333 | +1.000 |
+| **`SESSION_INTERRUPTION`** | +0.000 | +0.200 | +157.3 | -0.667 | +0.000 |
+| **`REPEATED_EXPLANATION`** | +1.000 | +1.000 | +288.3 | -3.667 | +1.000 |
+| **`NEEDLE_IN_HAYSTACK`** | +0.667 | +0.842 | +1266.0 | -2.667 | +1.000 |
+| **`STALE_KNOWLEDGE_REJECTION`** | +1.000 | +1.000 | +283.7 | -4.000 | +1.000 |
 
 ### Category-Level Detailed Breakdown (10 Clusters)
 
@@ -153,7 +180,7 @@ All four retrieval strategies were evaluated on the identical query set across a
 
 | **Vector (Cosine)** | 0.641 | 0.767 | 0.676 | 0.560 | 0.800 | 0.659 | 0.717 | 0.729 | 0.259 |
 | **Knowledge Graph (Traversal)** | 0.589 | 0.633 | 0.604 | 0.767 | 0.657 | 0.708 | 0.633 | 0.631 | 0.178 |
-| **Hybrid (RRF Fusion)** | 0.661 | 0.767 | 0.698 | 0.519 | 0.800 | 0.629 | 0.700 | 0.717 | 0.306 |
+| **Hybrid (RRF Fusion)** | 0.661 | 0.767 | 0.698 | 0.519 | 0.800 | 0.629 | 0.717 | 0.732 | 0.306 |
 | **ML-Enhanced (Reranked)** | 0.668 | 0.800 | 0.709 | 0.537 | 0.829 | 0.652 | 0.733 | 0.750 | 0.299 |
 
 > [!NOTE]
@@ -227,6 +254,7 @@ Every scenario was audited and explicitly labeled according to ground truth:
 ### 1. Does AI Brain reduce total context consumption?
 - **Direct Answer**: **No for single isolated queries, but yes compared to unbounded raw event replay in long sessions.**
 - For a single query, Condition C consumes **437.8 estimated tokens** compared to **65.9 estimated tokens** for Cold Start (+564.0% context overhead).
+- **Token Cost Direction & Overhead**: The category-level token difference is **+371.83 tokens** ($C - A$). Subtraction direction is defined as Condition C minus Condition A. A positive difference indicates that AI Brain consumes more tokens than Cold Start. This constitutes **additional token overhead**, not a performance improvement.
 - However, compared to Raw History (274.1 estimated tokens in early multi-turn sessions), Brain's budgeted context package bounds token growth, preventing transcript overflow as history expands.
 
 ### 2. Does it improve retrieval quality?
@@ -236,8 +264,9 @@ Every scenario was audited and explicitly labeled according to ground truth:
 ### 3. Does it improve task continuation?
 - **Direct Answer**: **Significantly over Cold Start (+70.0%), with qualitative superiority over Raw History on supersession and conflicts.**
 - Task continuation success is **0.0% for Cold Start**, **83.3% for Raw History**, and **70.0% for AI Brain**.
-- McNemar test vs Cold Start: **p = 9.54e-07 (p < 0.001)** (statistically significant).
+- McNemar test vs Cold Start: **p = 9.54e-07 (p < 0.001)** (statistically significant on benchmark dataset).
 - McNemar test vs Raw History: **p = 0.3877 (p = 0.39)** (not statistically significant in nominal pass rate). Condition B achieves higher nominal pass on basic static tasks (83.3% vs 70.0%) because raw logs retain full text without extraction cutoffs; however, Condition B fails completely on supersession and contradiction management (leaking stale requirements in 4 scenarios), whereas Brain achieves 100% stale rejection and 100% dispute handling.
+- **Generalization Safeguard**: Category-level statistical significance is exploratory and conditional on treating the 10 categories as independent clusters. It does not establish general superiority across open-ended real-world agent tasks.
 
 ### 4. Does it reduce repeated explanations?
 - **Direct Answer**: **Yes**. Condition A required **105 manual user explanations**, whereas Condition C eliminated **94 explanations**.
@@ -265,6 +294,6 @@ Every scenario was audited and explicitly labeled according to ground truth:
 ## 9. Evaluation Limitations & Safeguards
 
 1. **Curated Domain Scenarios**: The 30 scenarios represent structured software engineering tasks. Real-world deployments will feature noisier event logs and informal conversational interruptions.
-2. **Cluster Independence**: With 10 categories of 3 scenarios each, cluster-stratified analysis confirms significance at df=9, but broader multi-project trials are required before claiming general production validation.
+2. **Cluster Independence & Statistical Qualification**: With 10 categories of 3 scenarios each, category-level t-tests, p-values, and confidence intervals are exploratory and conditional on treating the 10 categories as independent clusters. Because the benchmark scenarios represent curated software engineering workflows rather than a random sample of all possible agent workloads, these results do not establish general performance across real-world agent tasks, and statistical significance must not be interpreted as proof of general superiority.
 3. **Tokenizer Approximation**: All token figures are estimated using `DeterministicTokenizer` (~4 characters per token heuristic approximation).
 4. **Zero Data Contamination**: All runs executed in isolated in-memory SQLite stores (`:memory:`) without touching production databases.

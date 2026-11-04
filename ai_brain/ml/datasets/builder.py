@@ -47,34 +47,27 @@ class DatasetSplitter:
             val = shuffled[n_train:n_train + n_val]
             test = shuffled[n_train + n_val:]
         else:
-            # Group by root/source memory ID so examples concerning the same memory are kept in the same split
-            groups = defaultdict(list)
-            for ex in examples:
-                if ex.provenance.source_memory_ids:
-                    key = ex.provenance.source_memory_ids[0]
-                else:
-                    key = ex.example_id
-                groups[key].append(ex)
+            # Group by connected components of all source memory IDs so any examples
+            # sharing ANY source memory ID are guaranteed to remain in the same split.
+            groups = DatasetSplitter._find_connected_memory_groups(examples)
+            rng.shuffle(groups)
 
-            group_keys = list(groups.keys())
-            rng.shuffle(group_keys)
-
-            n_groups = len(group_keys)
+            n_groups = len(groups)
             n_val_groups = max(1, int(n_groups * val_ratio))
             n_test_groups = int(n_groups * test_ratio) if test_ratio > 0.0 else 0
             n_train_groups = n_groups - n_val_groups - n_test_groups
 
-            val_keys = set(group_keys[:n_val_groups])
-            test_keys = set(group_keys[n_val_groups:n_val_groups + n_test_groups])
+            val_groups = groups[:n_val_groups]
+            test_groups = groups[n_val_groups:n_val_groups + n_test_groups]
+            train_groups = groups[n_val_groups + n_test_groups:]
 
             train, val, test = [], [], []
-            for k, grp_examples in groups.items():
-                if k in val_keys:
-                    val.extend(grp_examples)
-                elif k in test_keys:
-                    test.extend(grp_examples)
-                else:
-                    train.extend(grp_examples)
+            for grp in train_groups:
+                train.extend(grp)
+            for grp in val_groups:
+                val.extend(grp)
+            for grp in test_groups:
+                test.extend(grp)
 
             # Safety fallback if rounding left train empty
             if not train and val:
@@ -119,25 +112,18 @@ class DatasetSplitter:
             for i, ex in enumerate(shuffled):
                 folds[i % k].append(ex)
         else:
-            groups = defaultdict(list)
-            for ex in examples:
-                if ex.provenance.source_memory_ids:
-                    key = ex.provenance.source_memory_ids[0]
-                else:
-                    key = ex.example_id
-                groups[key].append(ex)
+            # Group by connected components of all source memory IDs
+            groups = DatasetSplitter._find_connected_memory_groups(examples)
+            rng.shuffle(groups)
 
-            group_keys = list(groups.keys())
-            rng.shuffle(group_keys)
-
-            if len(group_keys) < k:
+            if len(groups) < k:
                 raise DatasetValidationError(
-                    f"Number of distinct memory groups ({len(group_keys)}) is less than k ({k})"
+                    f"Number of distinct connected memory groups ({len(groups)}) is less than k ({k})"
                 )
 
             folds = [[] for _ in range(k)]
-            for i, grp_key in enumerate(group_keys):
-                folds[i % k].extend(groups[grp_key])
+            for i, grp in enumerate(groups):
+                folds[i % k].extend(grp)
 
         splits = []
         for i in range(k):
@@ -158,4 +144,52 @@ class DatasetSplitter:
             splits.append(split_obj)
 
         return splits
+
+    @staticmethod
+    def _find_connected_memory_groups(
+        examples: Sequence[DatasetExample],
+    ) -> List[List[DatasetExample]]:
+        """
+        Computes transitive connected components across all source memory IDs.
+        Guarantees that if example A and example B share ANY source memory ID
+        (directly or through a chain of shared IDs), they are placed in the same group.
+        """
+        mem_to_ex_indices = defaultdict(list)
+        for idx, ex in enumerate(examples):
+            mems = set(ex.provenance.source_memory_ids or ()) - {"", "none", None}
+            if not mems:
+                mem_to_ex_indices[f"__isolated_{ex.example_id}_{idx}"].append(idx)
+            else:
+                for m in mems:
+                    mem_to_ex_indices[m].append(idx)
+
+        parent = list(range(len(examples)))
+
+        def find(i: int) -> int:
+            path = []
+            while parent[i] != i:
+                path.append(i)
+                i = parent[i]
+            for node in path:
+                parent[node] = i
+            return i
+
+        def union(i: int, j: int) -> None:
+            root_i = find(i)
+            root_j = find(j)
+            if root_i != root_j:
+                parent[root_i] = root_j
+
+        for mem, indices in mem_to_ex_indices.items():
+            first = indices[0]
+            for other in indices[1:]:
+                union(first, other)
+
+        groups_dict = defaultdict(list)
+        for idx, ex in enumerate(examples):
+            root = find(idx)
+            groups_dict[root].append(ex)
+
+        return list(groups_dict.values())
+
 

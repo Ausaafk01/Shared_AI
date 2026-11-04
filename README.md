@@ -792,7 +792,7 @@ print(f"Claude Output: {claude_res.content}")
 
 ## Running Automated Tests
 
-Run all 316 automated tests across the Event System, Memory Model, Memory Extraction, Memory Updating, Conflict Management, Knowledge Graph, Vector Memory, Retrieval Engine, Context Builder, Brain Loop, Multi-Agent System, and Machine Learning Layer:
+Run all 328 automated tests across the Event System, Memory Model, Memory Extraction, Memory Updating, Conflict Management, Knowledge Graph, Vector Memory, Retrieval Engine, Context Builder, Brain Loop, Multi-Agent System, Machine Learning Layer, and Benchmarking Framework:
 
 ```bash
 python -m unittest discover -s tests -v
@@ -823,6 +823,12 @@ python examples/multi_agent_demo.py
 
 # Machine Learning models, feedback collection & evaluation demo
 python examples/ml_demo.py
+
+# Phase 4 Benchmarking & Evaluation live demonstration
+python examples/benchmark_demo.py
+
+# Full Phase 4 benchmark suite CLI execution
+python scripts/run_benchmarks.py
 ```
 
 ---
@@ -865,3 +871,14 @@ python examples/ml_demo.py
 - [x] **Model Evaluation & Comparative Baselines**: Evaluates score calibration (MAE), classification metrics (Precision, Recall, F1, Brier score), and cross-validation confidence intervals against deterministic baselines.
 - [x] **Brain Loop & Retrieval Integration**: Integrated execution paths in `RetrievalEngine` score blending, `LoopMemoryHandler` importance scoring, `MemoryComparator` duplicate detection, `ConflictDetector` conflict typing, and `BrainLoop` feedback logging.
 - [x] **Preserved Phase 1 & Phase 2 Baseline**: All 288 existing tests preserved + 28 ML tests = 316 tests (312 passing, 4 live skipped). All 7 demos passing.
+
+### Phase 4: Evaluation & Benchmarking (Complete)
+- [x] **Two Experimental Conditions**: Condition A (Without Brain, strictly stateless single-turn baseline) vs Condition B (With Brain, complete persistent memory, graph, vectors, and Context Builder).
+- [x] **Structured Multi-Session Benchmark Suite**: 10 scenario categories covering Task Continuation, Architectural Decisions, Technical Constraints, Updated Requirements, Contradictory Claims, Agent Switching, Session Interruption, Repeated Explanation Avoidance, Needle in a Haystack, and Stale Knowledge Rejection.
+- [x] **Context and Token Consumption Tracking**: Measures raw input tokens, retrieved memory tokens, Context Builder compressed tokens, output tokens, and net delta, transparently disclosing single-turn context overhead.
+- [x] **Retrieval Accuracy Metrics**: Measures Precision@K, Recall@K, F1, MRR, NDCG@K, and irrelevant retrieval rate across Vector, Graph, Hybrid, and ML-enhanced strategies.
+- [x] **Task Continuation & Explanation Avoidance**: Quantitative evaluation showing a +60.0% task continuation rate improvement (0% vs 60%) and 29 repeated explanations avoided across 10 scenarios.
+- [x] **Conflict & Stale Knowledge Handling**: 100% preservation of disputed assertions with explicit prompt warnings, clean requirement supersession, and zero stale memory leakage.
+- [x] **Rigorous Statistical Analysis**: Paired comparisons with sample mean differences, standard deviations, standard errors, 95% confidence intervals, and Cohen's d effect sizes (d = 1.16 for task success, d = -1.68 for repeated explanations).
+- [x] **Automated Reporting Framework**: Machine-readable JSON (`benchmarks_report.json`) and Markdown (`benchmarks_report.md`) exports answering all 8 core evaluation questions.
+- [x] **Full Regression Verification**: All 316 prior tests preserved + 12 new benchmark tests = 328 total automated tests (324 passed, 4 live skipped). All 8 demonstrations working offline.

@@ -67,9 +67,10 @@ class BenchmarkRunner:
     Operates in 100% ephemeral in-memory storage to prevent contaminating production data.
     """
 
-    def __init__(self, token_budget: int = 1500) -> None:
+    def __init__(self, token_budget: int = 1500, include_provenance_section: bool = True) -> None:
         self.token_budget = token_budget
         self.tokenizer = _DEFAULT_TOKENIZER
+        self.include_provenance_section = include_provenance_section
 
     def run_scenario(self, scenario: BenchmarkScenario) -> PairedComparison:
         """Runs a single scenario under all three conditions and returns comparison."""
@@ -142,7 +143,10 @@ class BenchmarkRunner:
         prompt_tokens = self.tokenizer.count_tokens(prompt)
 
         # Calculate history tokens that baseline lacks access to
-        all_seed_events = list(scenario.historical_events) + list(scenario.distractor_events)
+        all_seed_events = sorted(
+            list(scenario.historical_events) + list(scenario.distractor_events),
+            key=lambda ev: ev.timestamp,
+        )
         history_tokens = sum(
             self.tokenizer.count_tokens(ev.output.get("text", "") or "")
             for ev in all_seed_events
@@ -283,7 +287,10 @@ class BenchmarkRunner:
         prompt = scenario.task_prompt
         prompt_tokens = self.tokenizer.count_tokens(prompt)
 
-        all_seed_events = list(scenario.historical_events) + list(scenario.distractor_events)
+        all_seed_events = sorted(
+            list(scenario.historical_events) + list(scenario.distractor_events),
+            key=lambda ev: ev.timestamp,
+        )
         
         # Format raw events chronologically
         raw_event_lines = []
@@ -459,7 +466,11 @@ class BenchmarkRunner:
             missing_details_notes=tuple(missing_notes),
         )
 
-    def run_condition_c_brain(self, scenario: BenchmarkScenario) -> ConditionRunResult:
+    def run_condition_c_brain(
+        self,
+        scenario: BenchmarkScenario,
+        include_provenance_section: Optional[bool] = None,
+    ) -> ConditionRunResult:
         """
         Condition C (AI Brain Persistent Memory):
         Brain processes historical seed events into immutable memories, graph, and vectors.
@@ -517,7 +528,8 @@ class BenchmarkRunner:
             allow_partial_results=True,
         )
 
-        ctx_builder = ContextBuilder(default_max_tokens=self.token_budget)
+        prov_flag = self.include_provenance_section if include_provenance_section is None else include_provenance_section
+        ctx_builder = ContextBuilder(default_max_tokens=self.token_budget, include_provenance_section=prov_flag)
 
         # Brain Loop orchestration with real subsystem components
         loop = BrainLoop(
@@ -530,7 +542,10 @@ class BenchmarkRunner:
         )
 
         # 1. Seed historical events into Brain
-        all_seed_events = list(scenario.historical_events) + list(scenario.distractor_events)
+        all_seed_events = sorted(
+            list(scenario.historical_events) + list(scenario.distractor_events),
+            key=lambda ev: ev.timestamp,
+        )
         for ev in all_seed_events:
             ev_store.store(ev)
 

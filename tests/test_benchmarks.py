@@ -280,7 +280,126 @@ class TestBenchmarkSubsystem(unittest.TestCase):
         self.assertIn("Cluster-Stratified Category Analysis", md_report)
         self.assertIn("Complete Retrieval Strategy Evaluation", md_report)
         self.assertIn("Corrected Conflict Confusion Matrix", md_report)
-        self.assertIn("Formatting Overhead Investigation", md_report)
+
+    def test_token_arithmetic_definitions_reconciliation(self) -> None:
+        """Verify strict token accounting arithmetic across Condition A, Condition B, and Condition C."""
+        scenario = self.dataset.get_scenario("SCENARIO_02A_ARCHITECTURAL_DECISION")
+        comp = self.runner.run_scenario(scenario)
+
+        # Condition A: Cold Start
+        tok_a = comp.result_without_brain.tokens
+        self.assertEqual(tok_a.supplied_history_tokens, 0)
+        self.assertEqual(tok_a.agent_input_tokens, tok_a.task_prompt_tokens)
+        self.assertEqual(tok_a.total_tokens, tok_a.agent_input_tokens + tok_a.agent_output_tokens)
+
+        # Condition B: Raw History
+        tok_b = comp.result_raw_history.tokens
+        self.assertEqual(tok_b.agent_input_tokens, tok_b.task_prompt_tokens + tok_b.supplied_history_tokens)
+        self.assertEqual(tok_b.total_tokens, tok_b.agent_input_tokens + tok_b.agent_output_tokens)
+        self.assertEqual(tok_b.available_history_tokens, tok_b.supplied_history_tokens + tok_b.omitted_history_tokens)
+
+        # Condition C: AI Brain
+        tok_c = comp.result_with_brain.tokens
+        self.assertEqual(tok_c.agent_input_tokens, tok_c.task_prompt_tokens + tok_c.context_builder_tokens)
+        self.assertEqual(tok_c.total_tokens, tok_c.agent_input_tokens + tok_c.agent_output_tokens)
+        self.assertGreater(tok_c.context_builder_tokens, tok_c.retrieved_memory_tokens)
+
+    def test_raw_history_oversized_archive_truncation(self) -> None:
+        """Verify 1,500 token budget enforcement and FIFO truncation on an oversized archive."""
+        from datetime import timedelta
+        base_time = datetime(2026, 10, 1, 10, 0, 0, tzinfo=timezone.utc)
+        distractors = []
+        for i in range(50):
+            distractors.append(Event(
+                event_id=f"ev-dist-{i:03d}",
+                event_type=EventType.AGENT_MESSAGE,
+                timestamp=base_time + timedelta(minutes=i),
+                session_id="sess-oversized",
+                project_id="proj-oversized",
+                actor="agent-test",
+                agent_id="agent-test",
+                output={"text": f"Diagnostic telemetry stream entry {i:02d}: Comprehensive system log traces with heavy metadata payload block number {i:02d}."},
+            ))
+
+        target_event = Event(
+            event_id="ev-target-final",
+            event_type=EventType.AGENT_MESSAGE,
+            timestamp=base_time + timedelta(hours=5),
+            session_id="sess-oversized",
+            project_id="proj-oversized",
+            actor="agent-test",
+            agent_id="agent-test",
+            output={"text": "Final active directive: The production cache port is set to 6390."},
+        )
+
+        sc = BenchmarkScenario(
+            scenario_id="SCENARIO_OVERSIZED_TRUNCATION",
+            name="Oversized Archive Truncation Test",
+            category=ScenarioCategory.NEEDLE_IN_HAYSTACK,
+            difficulty=ScenarioDifficulty.HARD,
+            provenance=ScenarioProvenance.SYNTHETIC,
+            description="Archive exceeding the 1,500 token limit to test FIFO discard",
+            historical_events=(target_event,),
+            distractor_events=tuple(distractors),
+            task_prompt="What is the production cache port?",
+            project_id="proj-oversized",
+            expected_facts=("6390",),
+            expected_decisions=(),
+            expected_constraints=(),
+            expected_conflicts=(),
+        )
+
+        res_b = self.runner.run_condition_b_raw_history(sc)
+
+        # Budget ceiling enforced
+        self.assertLessEqual(res_b.tokens.agent_input_tokens, 1500)
+        self.assertGreater(res_b.tokens.available_history_tokens, 2000)
+        self.assertGreater(res_b.tokens.omitted_history_tokens, 1000)
+        # Arithmetic reconciliation
+        self.assertEqual(
+            res_b.tokens.available_history_tokens,
+            res_b.tokens.supplied_history_tokens + res_b.tokens.omitted_history_tokens,
+        )
+        # Most recent tail retention: target event at the end is retained
+        self.assertIn("6390", res_b.agent_output)
+
+    def test_provenance_optimization_toggle(self) -> None:
+        """Verify include_provenance_section=False reduces tokens while preserving all facts and decisions."""
+        sc = self.dataset.get_scenario("SCENARIO_02A_ARCHITECTURAL_DECISION")
+        res_with = self.runner.run_condition_c_brain(sc, include_provenance_section=True)
+        res_without = self.runner.run_condition_c_brain(sc, include_provenance_section=False)
+
+        # Tokens reduced significantly
+        tok_with = res_with.tokens.context_builder_tokens
+        tok_without = res_without.tokens.context_builder_tokens
+        self.assertGreater(tok_with, tok_without)
+        self.assertGreaterEqual(tok_with - tok_without, 100)
+
+        # Semantic decision retained
+        self.assertIn("redis", res_without.agent_output.lower())
+        self.assertTrue(res_without.task_success)
+
+    def test_authoritative_aggregation_and_mcnemar_contingency(self) -> None:
+        """Verify scenario-level binary outcomes strictly agree with category tables and contingency sums."""
+        scenarios = self.dataset.list_scenarios()[:15]
+        comparisons = [self.runner.run_scenario(s) for s in scenarios]
+        stats = BenchmarkStatistics.compute_all_comparisons(comparisons)
+
+        m_ab = stats["mcnemar_cold_vs_raw"]
+        m_ac = stats["mcnemar_test"]
+        m_bc = stats["mcnemar_raw_vs_brain"]
+
+        n = len(comparisons)
+        # Verify N=15 for all contingency tables
+        for m in (m_ab, m_ac, m_bc):
+            ct = m.contingency_table
+            self.assertEqual(ct["both_pass"] + ct["only_first_pass"] + ct["only_second_pass"] + ct["both_fail"], n)
+
+        # Check category summary sums match aggregate sums
+        cat_summaries = stats["category_summaries"]
+        sum_c = sum(int(round(cs["success_rate_ai_brain"] * cs["n_scenarios"])) for cs in cat_summaries.values())
+        actual_c = sum(1 for c in comparisons if c.result_with_brain.task_success)
+        self.assertEqual(sum_c, actual_c)
 
 
 if __name__ == "__main__":

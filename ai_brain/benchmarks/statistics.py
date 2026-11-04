@@ -346,6 +346,13 @@ class BenchmarkStatistics:
         comparisons: Sequence[PairedComparison],
     ) -> Dict[str, Any]:
         # 1. Exact McNemar's Tests for Binary Task Success
+        # Cold Start (A) vs Raw History (B)
+        pairs_ab = [
+            (c.result_without_brain.task_success, c.result_raw_history.task_success if c.result_raw_history else False)
+            for c in comparisons
+        ]
+        mcnemar_ab = cls.compute_mcnemar_test(pairs_ab, comparison_name="Condition A (Cold Start) vs Condition B (Raw History)")
+
         # Cold Start (A) vs AI Brain (C)
         pairs_ac = [
             (c.result_without_brain.task_success, c.result_with_brain.task_success)
@@ -428,6 +435,7 @@ class BenchmarkStatistics:
         raw_tok_summary = cls.analyze_paired_metric("Raw History vs Brain: Tokens Consumed", tok_raw, tok_w, higher_is_better=False)
 
         return {
+            "mcnemar_cold_vs_raw": mcnemar_ab,
             "mcnemar_test": mcnemar_ac,
             "mcnemar_raw_vs_brain": mcnemar_bc,
             "cluster_task_success": cluster_task_success,

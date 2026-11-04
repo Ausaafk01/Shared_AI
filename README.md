@@ -303,6 +303,41 @@ Phase 2 introduces a decoupled, multi-agent orchestration architecture allowing 
 
 ---
 
+## 12. Machine Learning Layer
+
+The Machine Learning layer (`ai_brain/ml/`) provides modular, offline-capable, explainable models that enhance memory importance prediction, retrieval re-ranking, duplicate detection, conflict classification, and staleness estimation.
+
+### Key Architectural Guarantees:
+- **Zero Mandatory External APIs**: 100% offline, local execution using standard mathematical and calibrated statistical methods without requiring vendor API credentials or heavy runtime dependencies.
+- **Graceful Deterministic Fallback**: Every ML component automatically falls back to deterministic rule-based logic if untrained, if confidence falls below configurable thresholds, or if errors occur.
+- **Explainable Predictions & Calibrated Confidence**: Every prediction outputs numeric confidence and granular feature contributions explaining why the prediction was made.
+- **Full Provenance & Leakage Protection**: Datasets strictly distinguish real, manually labeled, feedback-derived, and synthetic examples. Dataset splitters group by source memory ID to ensure zero train/validation data leakage.
+- **Controlled Feedback Lifecycle**: Feedback records are durably captured in SQLite with provenance and model versions; batch preparation is decoupled from model retraining to prevent instability.
+- **No Unsafe Autonomous Actions**: Potentially stale memories are flagged for review rather than deleted; candidate duplicates are never merged solely on embedding similarity; contradictory claims are preserved as disputed.
+
+### ML Models:
+1. **Memory Importance Model (`MemoryImportanceModel`)**:
+   - Predicts long-term memory retention value in `[0.0, 1.0]`.
+   - Evaluates memory type (decision, preference, constraint vs temporary), decision indicators, constraint markers, temporal decay, and provenance breadth.
+   - Non-circular: does not treat frequently retrieved information as automatically important.
+2. **Relevance Ranking Model (`RelevanceRankingModel`)**:
+   - Optional secondary re-ranker across candidates retrieved by Vector, Graph, or Hybrid search.
+   - Blends base retrieval score, query term overlap, agent affinity, recency decay, and status penalties.
+   - Preserves deterministic retrieval filters and score breakdowns.
+3. **Duplicate Detection Model (`DuplicateDetectionModel`)**:
+   - Classifies memory pairs into `EXACT_DUPLICATE`, `SEMANTIC_DUPLICATE`, `RELATED_DISTINCT`, or `CONTRADICTORY`.
+   - Prevents merging contradictory claims under high embedding similarity.
+4. **Conflict Detection Model (`ConflictDetectionModel`)**:
+   - Distinguishes genuine contradictions (`FACTUAL`, `TECHNICAL`, `TEMPORAL`, `DECISION`, `SOURCE`) from non-conflicting elaborations and chronological updates.
+5. **Staleness Detection Model (`StalenessDetectionModel`)**:
+   - Assesses memory obsolescence risk `[0.0, 1.0]` without deleting memories.
+   - Preserves history and makes staleness probability inspectable for retrieval and context building.
+
+### Deferred Reinforcement Learning / Contextual Bandits:
+- Reinforcement learning and online contextual bandits (e.g., epsilon-greedy, Thompson sampling) are explicitly deferred. At this phase, interaction volume is discrete and sparse, and online exploration would risk serving degraded context packages to agents, violating deterministic safety guarantees. Calibrated supervised models with explicit feedback ingestion are the appropriate, verifiable architecture.
+
+---
+
 ## Project Structure
 
 ```
@@ -785,6 +820,9 @@ python examples/brain_loop_demo.py
 
 # Multi-Agent System knowledge sharing, switching & collaboration demo
 python examples/multi_agent_demo.py
+
+# Machine Learning models, feedback collection & evaluation demo
+python examples/ml_demo.py
 ```
 
 ---
@@ -814,3 +852,16 @@ python examples/multi_agent_demo.py
 - [x] **External Provider Adapters**: Decoupled adapters for `ClaudeAdapter`, `CodexAdapter`, `GeminiAdapter`, and `AntigravityAdapter` with mock transports and credential isolation.
 - [x] **Automated Test Suite**: 288 total unit and integration tests (250 Phase 1 tests 100% preserved + 38 Phase 2 tests [34 passing mock tests, 4 live integration tests with explicit credential skipping]).
 - [x] **Comprehensive Demos & Docs**: Working `examples/multi_agent_demo.py` and detailed `README.md` documentation.
+
+### Phase 3: Machine Learning Layer (Complete)
+- [x] **Memory Importance Model**: Calibrated logistic model predicting long-term retention value from content, type, constraints, decisions, and provenance breadth.
+- [x] **Relevance Ranking Model**: Multi-stream ranking model acting as an optional secondary re-ranker over vector, graph, and hybrid retrieval candidates.
+- [x] **Duplicate Detection Model**: Fine-grained pair classifier distinguishing exact duplicates, semantic rewrites, related distinct knowledge, and contradictory claims.
+- [x] **Conflict Detection Model**: Nuanced contradiction classifier distinguishing genuine technical, temporal, decision, and factual conflicts from compatible elaborations and chronological updates.
+- [x] **Staleness Detection Model**: Obsolescence risk probability estimator without memory deletion, preserving historical records and status flags.
+- [x] **Feature Extraction Pipeline**: Modular extractors for lexical/textual, temporal lifecycle, and graph/vector structural features.
+- [x] **Structured Dataset & Leakage Protection**: Explicit provenance (`REAL`, `MANUALLY_LABELLED`, `FEEDBACK_DERIVED`, `SYNTHETIC`) and source-memory-grouped splitters ensuring zero data leakage.
+- [x] **Feedback Collection System**: SQLite-backed `FeedbackCollector` recording retrieval, duplicate, conflict, importance, and staleness signals with controlled batch preparation (no auto-retraining).
+- [x] **Model Evaluation & Comparative Baselines**: Precision, recall, F1, accuracy, Brier score, NDCG, MRR, and MAE comparing ML against deterministic baselines.
+- [x] **Brain Loop & Retrieval Integration**: Clean integration into `RetrievalEngine` re-ranking, `LoopMemoryHandler` importance enrichment, and `BrainLoop` feedback recording.
+- [x] **Preserved Phase 1 & Phase 2 Baseline**: All 288 existing tests preserved + 15 new ML tests = 303 tests (299 passing, 4 live skipped). All 7 demos passing.

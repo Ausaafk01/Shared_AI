@@ -4,7 +4,7 @@ Memory extraction, updating, conflict management, and integration handler for Br
 
 from dataclasses import dataclass, field
 import logging
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ai_brain.events.models import Event
 from ai_brain.graph.integration import GraphIntegrator
@@ -77,6 +77,7 @@ class LoopMemoryHandler:
         conflict_manager: Optional[ConflictManager] = None,
         graph_integrator: Optional[GraphIntegrator] = None,
         vector_manager: Optional[VectorMemoryManager] = None,
+        ml_service: Optional[Any] = None,
     ) -> None:
         self.memory_extractor = memory_extractor or MemoryExtractor()
         self.memory_updater = memory_updater or MemoryUpdater()
@@ -84,6 +85,7 @@ class LoopMemoryHandler:
         self.conflict_manager = conflict_manager or ConflictManager(updater=self.memory_updater)
         self.graph_integrator = graph_integrator
         self.vector_manager = vector_manager
+        self.ml_service = ml_service
 
         # In-memory index of current active memories per project
         # project_id -> {memory_id: Memory}
@@ -133,7 +135,35 @@ class LoopMemoryHandler:
             raise ExtractionStageError(f"Memory extraction failed on interaction events: {e}") from e
 
         # Strictly enforce project isolation
-        return tuple(m for m in extracted_memories if m.project_id == project_id)
+        project_mems = [m for m in extracted_memories if m.project_id == project_id]
+        if self.ml_service is not None and getattr(self.ml_service.config, "enable_importance_ml", False):
+            enriched = []
+            for m in project_mems:
+                pred = self.ml_service.predict_importance(m)
+                if not pred.fallback_used and pred.confidence >= self.ml_service.config.min_confidence_threshold:
+                    m_new = Memory(
+                        memory_id=m.memory_id,
+                        memory_type=m.memory_type,
+                        content=m.content,
+                        project_id=m.project_id,
+                        created_at=m.created_at,
+                        updated_at=m.updated_at,
+                        source_event_ids=m.source_event_ids,
+                        source_agent_ids=m.source_agent_ids,
+                        importance=float(pred.target_value),
+                        confidence=m.confidence,
+                        status=m.status,
+                        relationships=m.relationships,
+                        metadata=m.metadata,
+                        root_memory_id=m.root_memory_id,
+                        parent_memory_id=m.parent_memory_id,
+                        version=m.version,
+                    )
+                    enriched.append(m_new)
+                else:
+                    enriched.append(m)
+            return tuple(enriched)
+        return tuple(project_mems)
 
     def update_memories_and_conflicts(
         self,

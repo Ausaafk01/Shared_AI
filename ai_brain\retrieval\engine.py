@@ -6,7 +6,7 @@ hybrid fusion, and relevance scoring.
 from datetime import datetime, timezone
 import logging
 import time
-from typing import List, Optional, Sequence, Union
+from typing import Any, List, Optional, Sequence, Union
 
 from ai_brain.graph.graph import KnowledgeGraph
 from ai_brain.retrieval.exceptions import (
@@ -59,6 +59,7 @@ class RetrievalEngine:
         fusion: Optional[HybridFusion] = None,
         scorer: Optional[RelevanceScorer] = None,
         allow_partial_results: bool = True,
+        ml_ranker: Optional[Any] = None,
     ) -> None:
         # Resolve vector retriever
         if vector_retriever is not None:
@@ -80,6 +81,7 @@ class RetrievalEngine:
         self.fusion = fusion or HybridFusion()
         self.scorer = scorer or RelevanceScorer()
         self.allow_partial_results = allow_partial_results
+        self.ml_ranker = ml_ranker
 
     def retrieve(
         self,
@@ -209,6 +211,8 @@ class RetrievalEngine:
 
         scored_items = [self.scorer.score_candidate(c) for c in candidates]
         scored_items.sort(key=lambda item: (-item.score, item.memory_id))
+        if self.ml_ranker is not None:
+            scored_items = self.ml_ranker.rerank(scored_items, query=p_query.original_query)
 
         t_elapsed = (time.perf_counter() - t_start) * 1000.0
         return RetrievalResponse(
@@ -291,6 +295,8 @@ class RetrievalEngine:
 
         scored_items = [self.scorer.score_candidate(c) for c in candidates]
         scored_items.sort(key=lambda item: (-item.score, item.memory_id))
+        if self.ml_ranker is not None:
+            scored_items = self.ml_ranker.rerank(scored_items, query=p_query.original_query)
 
         t_elapsed = (time.perf_counter() - t_start) * 1000.0
         return RetrievalResponse(
@@ -398,6 +404,8 @@ class RetrievalEngine:
         # 4. Multi-factor relevance scoring
         scored_items = [self.scorer.score_candidate(c) for c in fused_candidates]
         scored_items.sort(key=lambda item: (-item.score, item.memory_id))
+        if self.ml_ranker is not None:
+            scored_items = self.ml_ranker.rerank(scored_items, query=p_query.original_query)
 
         t_elapsed = (time.perf_counter() - t_start) * 1000.0
         return RetrievalResponse(

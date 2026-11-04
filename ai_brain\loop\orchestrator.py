@@ -4,7 +4,7 @@ Brain Loop orchestrator coordinating the complete interaction lifecycle.
 
 from datetime import datetime, timezone
 import logging
-from typing import Callable, Dict, List, Optional, Sequence, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 import uuid
 
 from ai_brain.context import ContextBuilder
@@ -93,10 +93,12 @@ class BrainLoop:
         event_handler: Optional[LoopEventHandler] = None,
         memory_handler: Optional[LoopMemoryHandler] = None,
         default_token_budget: Optional[int] = None,
+        ml_service: Optional[Any] = None,
     ) -> None:
         if event_store is None:
             raise ValueError("An EventStore instance is required for BrainLoop")
         self.event_store = event_store
+        self.ml_service = ml_service
 
         # Interaction storage resolution
         if interaction_store is not None:
@@ -126,6 +128,7 @@ class BrainLoop:
             conflict_manager=conflict_manager,
             graph_integrator=resolved_graph_integrator,
             vector_manager=vector_manager,
+            ml_service=self.ml_service,
         )
 
     @property

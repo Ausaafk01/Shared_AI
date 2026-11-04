@@ -864,6 +864,25 @@ class TestMLStrengthenedEdgeCases(unittest.TestCase):
         with self.assertRaises(DatasetValidationError):
             DatasetValidator.validate_split(split)
 
+        # Verify group-aware k-fold cross-validation prevents leakage across all folds
+        examples = [
+            DatasetExample(
+                example_id=f"ex-{i}",
+                features={"f": 1.0},
+                label=float(i % 2),
+                provenance=ExampleProvenance(
+                    source_type=ExampleSource.MANUALLY_LABELLED,
+                    created_at=self.now,
+                    source_memory_ids=(f"mem-grp-{i // 2}",),
+                ),
+            )
+            for i in range(10)
+        ]
+        cv_splits = DatasetSplitter.k_fold_split(examples, k=3, group_by_memory=True)
+        self.assertEqual(len(cv_splits), 3)
+        for s in cv_splits:
+            DatasetValidator.validate_split(s)
+
     def test_brain_loop_automated_feedback_collection(self) -> None:
         """BrainLoop automatically logs retrieval usage feedback upon completed interaction."""
         ev_store = SQLiteEventStore(":memory:")

@@ -90,3 +90,72 @@ class DatasetSplitter:
 
         DatasetValidator.validate_split(split_obj)
         return split_obj
+
+    @staticmethod
+    def k_fold_split(
+        examples: Sequence[DatasetExample],
+        k: int = 5,
+        *,
+        name: str = "dataset",
+        seed: int = 42,
+        group_by_memory: bool = True,
+    ) -> List[DatasetSplit]:
+        """
+        Creates k group-aware cross-validation splits.
+        Guarantees that examples from the same source memory never cross between training and validation folds.
+        """
+        if not examples:
+            raise DatasetValidationError("Cannot split empty example collection")
+        if k < 2:
+            raise DatasetValidationError(f"k must be at least 2, got {k}")
+
+        feature_names = tuple(sorted(examples[0].features.keys()))
+        rng = random.Random(seed)
+
+        if not group_by_memory:
+            shuffled = list(examples)
+            rng.shuffle(shuffled)
+            folds: List[List[DatasetExample]] = [[] for _ in range(k)]
+            for i, ex in enumerate(shuffled):
+                folds[i % k].append(ex)
+        else:
+            groups = defaultdict(list)
+            for ex in examples:
+                if ex.provenance.source_memory_ids:
+                    key = ex.provenance.source_memory_ids[0]
+                else:
+                    key = ex.example_id
+                groups[key].append(ex)
+
+            group_keys = list(groups.keys())
+            rng.shuffle(group_keys)
+
+            if len(group_keys) < k:
+                raise DatasetValidationError(
+                    f"Number of distinct memory groups ({len(group_keys)}) is less than k ({k})"
+                )
+
+            folds = [[] for _ in range(k)]
+            for i, grp_key in enumerate(group_keys):
+                folds[i % k].extend(groups[grp_key])
+
+        splits = []
+        for i in range(k):
+            val_fold = folds[i]
+            train_fold = []
+            for j in range(k):
+                if j != i:
+                    train_fold.extend(folds[j])
+
+            split_obj = DatasetSplit(
+                name=f"{name}_fold_{i+1}",
+                train_examples=tuple(train_fold),
+                validation_examples=tuple(val_fold),
+                test_examples=(),
+                feature_names=feature_names,
+            )
+            DatasetValidator.validate_split(split_obj)
+            splits.append(split_obj)
+
+        return splits
+

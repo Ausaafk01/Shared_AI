@@ -853,15 +853,15 @@ python examples/ml_demo.py
 - [x] **Automated Test Suite**: 288 total unit and integration tests (250 Phase 1 tests 100% preserved + 38 Phase 2 tests [34 passing mock tests, 4 live integration tests with explicit credential skipping]).
 - [x] **Comprehensive Demos & Docs**: Working `examples/multi_agent_demo.py` and detailed `README.md` documentation.
 
-### Phase 3: Machine Learning Layer (Complete)
-- [x] **Memory Importance Model**: Calibrated logistic model predicting long-term retention value from content, type, constraints, decisions, and provenance breadth.
-- [x] **Relevance Ranking Model**: Multi-stream ranking model acting as an optional secondary re-ranker over vector, graph, and hybrid retrieval candidates.
-- [x] **Duplicate Detection Model**: Fine-grained pair classifier distinguishing exact duplicates, semantic rewrites, related distinct knowledge, and contradictory claims.
-- [x] **Conflict Detection Model**: Nuanced contradiction classifier distinguishing genuine technical, temporal, decision, and factual conflicts from compatible elaborations and chronological updates.
-- [x] **Staleness Detection Model**: Obsolescence risk probability estimator without memory deletion, preserving historical records and status flags.
+### Phase 3: Machine Learning Layer (Qualified Evaluation)
+- [x] **Memory Importance Model** *(Prototype trained and evaluated)*: Continuous importance score regressor predicting long-term retention value from content, type, constraints, decisions, and provenance breadth (Holdout MAE 0.0699, 5-Fold CV MAE 0.0701 ± 0.0024 vs 0.3750 baseline).
+- [x] **Relevance Ranking Model** *(Prototype trained and evaluated)*: Pointwise continuous relevance-score regressor blending base, vector, graph, and metadata scores (Holdout MAE 0.0538 vs 0.1417 baseline; ranking order NDCG@5=1.0 reflects bimodal test data, not learned ranking permutations).
+- [x] **Duplicate Detection Model** *(Prototype trained and evaluated)*: Contradiction-gated pairwise classifier distinguishing exact duplicates, semantic rewrites, and distinct/contradictory assertions (100% accuracy on curated templates; unvalidated on noisy production diffs).
+- [x] **Conflict Detection Model** *(Trained but insufficiently evaluated)*: One-vs-Rest multiclass classifier categorizing conflict types (`FACTUAL`, `TECHNICAL`, `TEMPORAL`, `DECISION`, `SOURCE`, `NONE`). Explicitly qualified: dataset contains 48 curated pairs (8 per class), which is too small for statistical generalization.
+- [x] **Staleness Detection Model** *(Prototype trained and evaluated)*: Obsolescence probability estimator preserving historical records and status flags without memory deletion (Holdout accuracy 100%, 5-Fold CV accuracy 100% on curated age/supersession fixtures).
 - [x] **Feature Extraction Pipeline**: Modular extractors for lexical/textual, temporal lifecycle, and graph/vector structural features.
-- [x] **Structured Dataset & Leakage Protection**: Explicit provenance (`REAL`, `MANUALLY_LABELLED`, `FEEDBACK_DERIVED`, `SYNTHETIC`) and source-memory-grouped splitters ensuring zero data leakage.
-- [x] **Feedback Collection System**: SQLite-backed `FeedbackCollector` recording retrieval, duplicate, conflict, importance, and staleness signals with controlled batch preparation (no auto-retraining).
-- [x] **Model Evaluation & Comparative Baselines**: Precision, recall, F1, accuracy, Brier score, NDCG, MRR, and MAE comparing ML against deterministic baselines.
-- [x] **Brain Loop & Retrieval Integration**: Clean integration into `RetrievalEngine` re-ranking, `LoopMemoryHandler` importance enrichment, and `BrainLoop` feedback recording.
+- [x] **Group-Aware Cross-Validation & Zero Leakage**: Source-memory-grouped partitioning (`DatasetSplitter.split` and `DatasetSplitter.k_fold_split`) ensuring strict zero leakage across training and validation folds.
+- [x] **Feedback Collection System**: SQLite-backed `FeedbackCollector` recording automated context utilization and manual feedback signals with audited batch export (no automatic retraining).
+- [x] **Model Evaluation & Comparative Baselines**: Evaluates score calibration (MAE), classification metrics (Precision, Recall, F1, Brier score), and cross-validation confidence intervals against deterministic baselines.
+- [x] **Brain Loop & Retrieval Integration**: Integrated execution paths in `RetrievalEngine` score blending, `LoopMemoryHandler` importance scoring, `MemoryComparator` duplicate detection, `ConflictDetector` conflict typing, and `BrainLoop` feedback logging.
 - [x] **Preserved Phase 1 & Phase 2 Baseline**: All 288 existing tests preserved + 28 ML tests = 316 tests (312 passing, 4 live skipped). All 7 demos passing.

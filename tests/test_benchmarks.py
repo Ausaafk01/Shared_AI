@@ -442,39 +442,47 @@ class TestBenchmarkSubsystem(unittest.TestCase):
         self.assertAlmostEqual(res_c_07a.partial_success_score, 0.650, places=3)
 
     def test_cluster_stratified_statistical_calculations(self) -> None:
-        """Verify cluster standard error, t-statistic, confidence intervals, and underlying 10-cluster vectors (df=9)."""
+        """Verify cluster standard error, t-statistic, confidence intervals, exact t-critical (df=9), and underlying 10-cluster vectors."""
         scenarios = self.dataset.list_scenarios()
         comparisons = [self.runner.run_scenario(s) for s in scenarios]
         stats = BenchmarkStatistics.compute_all_comparisons(comparisons)
+
+        # Verify exact Student's t critical value for df=9 at alpha=0.05
+        exact_t_crit_df9 = BenchmarkStatistics._t_critical(9, 0.05)
+        self.assertAlmostEqual(exact_t_crit_df9, 2.262157162798205, places=12)
 
         # 1. Task Success
         cluster_task = stats["cluster_task_success"]
         self.assertEqual(cluster_task.degrees_of_freedom, 9)
         self.assertEqual(len(cluster_task.category_differences), 10)
-        self.assertAlmostEqual(cluster_task.cluster_mean_diff, 0.7000, places=4)
-        self.assertAlmostEqual(cluster_task.cluster_std_error, 0.1048, places=3)
-        self.assertAlmostEqual(cluster_task.t_statistic, 6.678, places=2)
-        self.assertAlmostEqual(cluster_task.confidence_interval_95[0], 0.4629, places=3)
-        self.assertAlmostEqual(cluster_task.confidence_interval_95[1], 0.9371, places=3)
+        self.assertAlmostEqual(cluster_task.cluster_mean_diff, 0.700000, places=5)
+        self.assertAlmostEqual(cluster_task.cluster_std_error, 0.104822, places=5)
+        self.assertAlmostEqual(cluster_task.t_statistic, 6.677987, places=4)
+        self.assertAlmostEqual(cluster_task.p_value, 0.00009079, places=6)
+        self.assertAlmostEqual(cluster_task.confidence_interval_95[0], 0.462876, places=5)
+        self.assertAlmostEqual(cluster_task.confidence_interval_95[1], 0.937124, places=5)
         self.assertTrue(cluster_task.is_statistically_significant)
 
         # 2. Partial Credit Score
         cluster_partial = stats["cluster_partial_success"]
         self.assertEqual(len(cluster_partial.category_differences), 10)
-        self.assertAlmostEqual(cluster_partial.cluster_mean_diff, 0.8167, places=4)
-        self.assertAlmostEqual(cluster_partial.cluster_std_error, 0.0899, places=3)
-        self.assertAlmostEqual(cluster_partial.t_statistic, 9.084, places=2)
-        self.assertAlmostEqual(cluster_partial.confidence_interval_95[0], 0.6133, places=3)
-        self.assertAlmostEqual(cluster_partial.confidence_interval_95[1], 1.0200, places=3)
+        self.assertAlmostEqual(cluster_partial.cluster_mean_diff, 0.816667, places=5)
+        self.assertAlmostEqual(cluster_partial.cluster_std_error, 0.089899, places=5)
+        self.assertAlmostEqual(cluster_partial.t_statistic, 9.084291, places=4)
+        self.assertAlmostEqual(cluster_partial.p_value, 0.00000791, places=7)
+        self.assertAlmostEqual(cluster_partial.confidence_interval_95[0], 0.613302, places=5)
+        self.assertAlmostEqual(cluster_partial.confidence_interval_95[1], 1.020032, places=5)
 
         # 3. Tokens Consumed Overhead (Direction: C - A)
         cluster_tok = stats["cluster_tokens"]
         self.assertEqual(len(cluster_tok.category_differences), 10)
-        self.assertAlmostEqual(cluster_tok.cluster_mean_diff, 371.8333, places=4)
-        self.assertAlmostEqual(cluster_tok.cluster_std_error, 101.1697, places=4)
-        self.assertAlmostEqual(cluster_tok.t_statistic, 3.675, places=2)
-        self.assertAlmostEqual(cluster_tok.confidence_interval_95[0], 142.9875, places=4)
-        self.assertAlmostEqual(cluster_tok.confidence_interval_95[1], 600.6792, places=4)
+        self.assertAlmostEqual(cluster_tok.cluster_mean_diff, 371.8333333333, places=6)
+        self.assertAlmostEqual(cluster_tok.cluster_std_error, 101.1696930416, places=6)
+        self.assertAlmostEqual(cluster_tok.t_statistic, 3.6753431008, places=6)
+        self.assertAlmostEqual(cluster_tok.p_value, 0.0051122716, places=6)
+        # Exact 95% CI: [142.9715875613, 600.6950791054]
+        self.assertAlmostEqual(cluster_tok.confidence_interval_95[0], 142.9715875613, places=6)
+        self.assertAlmostEqual(cluster_tok.confidence_interval_95[1], 600.6950791054, places=6)
 
         # Verify exact reproducibility directly from unrounded underlying category_differences
         unrounded_diffs = cluster_tok.category_differences
@@ -482,30 +490,32 @@ class TestBenchmarkSubsystem(unittest.TestCase):
         calc_var = sum((d - calc_mean) ** 2 for d in unrounded_diffs) / 9.0
         calc_s = math.sqrt(calc_var)
         calc_se = calc_s / math.sqrt(10.0)
-        calc_ci = (calc_mean - 2.262 * calc_se, calc_mean + 2.262 * calc_se)
-        self.assertAlmostEqual(calc_mean, cluster_tok.cluster_mean_diff, places=6)
-        self.assertAlmostEqual(calc_s, 319.9267, places=4)
-        self.assertAlmostEqual(calc_se, cluster_tok.cluster_std_error, places=6)
-        self.assertAlmostEqual(calc_ci[0], cluster_tok.confidence_interval_95[0], places=6)
-        self.assertAlmostEqual(calc_ci[1], cluster_tok.confidence_interval_95[1], places=6)
+        calc_ci = (calc_mean - exact_t_crit_df9 * calc_se, calc_mean + exact_t_crit_df9 * calc_se)
+        self.assertAlmostEqual(calc_mean, cluster_tok.cluster_mean_diff, places=10)
+        self.assertAlmostEqual(calc_s, 319.9266601914, places=6)
+        self.assertAlmostEqual(calc_se, cluster_tok.cluster_std_error, places=10)
+        self.assertAlmostEqual(calc_ci[0], cluster_tok.confidence_interval_95[0], places=10)
+        self.assertAlmostEqual(calc_ci[1], cluster_tok.confidence_interval_95[1], places=10)
 
         # 4. Repeated Explanations (Direction: C - A, negative indicates reduction)
         cluster_exp = stats["cluster_repeated_explanations"]
         self.assertEqual(len(cluster_exp.category_differences), 10)
-        self.assertAlmostEqual(cluster_exp.cluster_mean_diff, -3.1333, places=3)
-        self.assertAlmostEqual(cluster_exp.cluster_std_error, 0.4771, places=3)
-        self.assertAlmostEqual(cluster_exp.t_statistic, -6.567, places=2)
-        self.assertAlmostEqual(cluster_exp.confidence_interval_95[0], -4.2126, places=2)
-        self.assertAlmostEqual(cluster_exp.confidence_interval_95[1], -2.0541, places=2)
+        self.assertAlmostEqual(cluster_exp.cluster_mean_diff, -3.133333, places=5)
+        self.assertAlmostEqual(cluster_exp.cluster_std_error, 0.477131, places=5)
+        self.assertAlmostEqual(cluster_exp.t_statistic, -6.567025, places=4)
+        self.assertAlmostEqual(cluster_exp.p_value, 0.00010312, places=6)
+        self.assertAlmostEqual(cluster_exp.confidence_interval_95[0], -4.212679, places=5)
+        self.assertAlmostEqual(cluster_exp.confidence_interval_95[1], -2.053987, places=5)
 
         # 5. Decisions Maintained
         cluster_dec = stats["cluster_decisions_maintained"]
         self.assertEqual(len(cluster_dec.category_differences), 10)
-        self.assertAlmostEqual(cluster_dec.cluster_mean_diff, 0.8333, places=3)
-        self.assertAlmostEqual(cluster_dec.cluster_std_error, 0.1427, places=3)
-        self.assertAlmostEqual(cluster_dec.t_statistic, 5.839, places=2)
-        self.assertAlmostEqual(cluster_dec.confidence_interval_95[0], 0.5105, places=3)
-        self.assertAlmostEqual(cluster_dec.confidence_interval_95[1], 1.1562, places=3)
+        self.assertAlmostEqual(cluster_dec.cluster_mean_diff, 0.833333, places=5)
+        self.assertAlmostEqual(cluster_dec.cluster_std_error, 0.142725, places=5)
+        self.assertAlmostEqual(cluster_dec.t_statistic, 5.838742, places=4)
+        self.assertAlmostEqual(cluster_dec.p_value, 0.00024720, places=6)
+        self.assertAlmostEqual(cluster_dec.confidence_interval_95[0], 0.510467, places=5)
+        self.assertAlmostEqual(cluster_dec.confidence_interval_95[1], 1.156199, places=5)
 
     def test_zero_denominator_conflict_precision_convention(self) -> None:
         """Verify that zero predicted positive conflicts yields precision 0.0 by documented convention."""

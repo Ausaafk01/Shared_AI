@@ -187,7 +187,7 @@ class BenchmarkReporter:
                 f"with 100% stale rejection and 100% dispute precision.\n"
             )
 
-        md.append("### Cluster-Stratified Category Analysis (df = 9, Critical t = 2.262)\n")
+        md.append("### Cluster-Stratified Category Analysis (df = 9, Exact Critical t = 2.262157162798205)\n")
         md.append(
             "> [!WARNING]\n"
             "> **Statistical Inference Qualification**: The category-level t-tests, p-values, and confidence intervals below are "
@@ -222,7 +222,7 @@ class BenchmarkReporter:
             "> The category-level paired differences ($D_k = C_k - A_k$) are evaluated using unrounded, full-precision floating point arithmetic "
             "(e.g., $TASK\\_CONTINUATION = 341.0 - 64.666667 = +276.333333...$). "
             "All reported summary statistics—Mean Difference ($\\bar{D} = +371.8333$), Sample SD ($s = 319.9267$), Standard Error ($SE = 101.1697$), "
-            "and 95% Confidence Interval ($[142.9875, 600.6792]$, presented rounded to two decimals as $[142.99, 600.68]$ using $t_{\\text{crit}} = 2.262$ at $df=9$)—are "
+            "and Exact 95% Confidence Interval ($[142.9715875613, 600.6950791054]$, presented rounded to two decimals as $[142.97, 600.70]$ using exact $t_{\\text{crit}} = 2.262157162798205$ at $df=9$)—are "
             "computed directly from these unrounded full-precision values rather than from rounded display strings. "
             "The table below exposes the underlying values with four decimal places of precision to guarantee exact mathematical reproducibility:\n\n"
             "| Category ($k$) | Task Success Diff | Partial Credit Diff | Token Overhead ($C - A$) | Explanations Diff ($C - A$) | Decisions Diff ($C - A$) |\n"
@@ -374,7 +374,7 @@ class BenchmarkReporter:
             "- **Token Cost Direction & Overhead**: The category-level token difference is **+371.83 tokens** ($C - A$). "
             "Subtraction direction is defined as Condition C minus Condition A. A positive difference indicates that AI Brain consumes more tokens than Cold Start. "
             "This constitutes **additional token overhead**, not a performance improvement. "
-            "Summary statistics are derived from unrounded full-precision category differences (mean = +371.8333, SE = 101.1697, 95% CI = [142.9875, 600.6792], presented as [142.99, 600.68] with critical t = 2.262 at df = 9).\n"
+            "Summary statistics are derived from unrounded full-precision category differences (mean = +371.8333, SE = 101.1697, exact 95% CI = [142.9715875613, 600.6950791054], presented as [142.97, 600.70] with exact critical t = 2.262157162798205 at df = 9).\n"
             f"- However, compared to Raw History ({aggregate.token_metrics.avg_total_tokens_raw_history:.1f} estimated tokens in early multi-turn sessions), "
             "Brain's budgeted context package bounds token growth, preventing transcript overflow as history expands.\n"
         )

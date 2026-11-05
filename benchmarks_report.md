@@ -1,6 +1,6 @@
 # AI Brain — Phase 4 System Benchmarking & Comparative Evaluation Report
 
-**Generated**: 2026-11-05 08:33:22 UTC
+**Generated**: 2026-11-05 08:45:07 UTC
 
 **Total Scenarios Evaluated**: 30 realistic multi-session test scenarios (3 per category across 10 categories)
 
@@ -37,7 +37,7 @@ To isolate the causal value of persistent memory architectures from raw context 
 | **Repeated Explanations Needed** | 105 facts | 3 facts | 11 facts | **-94 avoided** | **--8 avoided** |
 | **Average Total Tokens / Query** | 65.9 est. tok | 274.1 est. tok | 437.8 est. tok | ++371.8 (++564.0%) | +163.7 (+59.7%) |
 | **Conflict Detection (TP / FP)** | 0 / 0 (Unaware) | 0 / 0 (Unaware) | 1 TP / 0 FP | 100% Precision | 100% Precision |
-| **Retrieval Accuracy (K=5)** | N/A (Stateless) | N/A (Unindexed Log) | Macro F1 = 0.70 | Ground Truth Validated | Micro F1 = 0.63 |
+| **Retrieval Accuracy (K=5)** | N/A (Stateless) | N/A (Unindexed Log) | Macro F1 = 0.71 | Ground Truth Validated | Micro F1 = 0.65 |
 
 ## 3. Statistical Analysis & Cluster-Aware Interpretation
 
@@ -82,7 +82,7 @@ While the suite contains 30 scenarios, they are organized into **10 distinct sce
 - **Exact Two-Sided Binomial Test**: p = **0.3877** (p = 0.39, not statistically significant across overall pass rate).
 - **Observed Direction & Qualitative Asymmetry**: Condition B achieves higher nominal pass rate on basic static tasks (83.3% vs 70.0%) because raw transcripts retain full text without extraction cutoffs. However, on tasks requiring supersession and contradiction management (Categories 4, 5, 10), Condition B fails (leaking stale requirements or missing contradictions in 4 scenarios), whereas Condition C succeeds with 100% stale rejection and 100% dispute precision.
 
-### Cluster-Stratified Category Analysis (df = 9, Critical t = 2.262)
+### Cluster-Stratified Category Analysis (df = 9, Exact Critical t = 2.262157162798205)
 
 > [!WARNING]
 > **Statistical Inference Qualification**: The category-level t-tests, p-values, and confidence intervals below are **exploratory and conditional on treating the ten categories as independent clusters**. Because the 30 benchmark scenarios represent curated software engineering tasks rather than a random sample of real-world agent tasks, **these results do not establish general performance across real-world agent tasks, and statistical significance must not be interpreted as proof of general superiority**.
@@ -95,7 +95,7 @@ While the suite contains 30 scenarios, they are organized into **10 distinct sce
 |---|---:|---:|:---:|---:|:---:|---|
 | **Task Continuation Success (Cluster-Stratified, df=9)** | +0.700 | 0.105 | [0.46, 0.94] | 6.68 | Yes | Higher is better (Task Pass Rate) |
 | **Partial Credit Score (Cluster-Stratified, df=9)** | +0.817 | 0.090 | [0.61, 1.02] | 9.08 | Yes | Higher is better (Partial Credit) |
-| **Total Tokens Consumed Overhead (Cluster-Stratified, df=9)** | +371.833 | 101.170 | [142.99, 600.68] | 3.68 | Yes | Lower is better (+371.83 token overhead) |
+| **Total Tokens Consumed Overhead (Cluster-Stratified, df=9)** | +371.833 | 101.170 | [142.97, 600.70] | 3.68 | Yes | Lower is better (+371.83 token overhead) |
 | **Repeated Explanations Needed (Cluster-Stratified, df=9)** | -3.133 | 0.477 | [-4.21, -2.05] | -6.57 | Yes | Lower is better (Explanations reduced) |
 | **Decisions Maintained (Cluster-Stratified, df=9)** | +0.833 | 0.143 | [0.51, 1.16] | 5.84 | Yes | Higher is better (Decisions preserved) |
 
@@ -103,7 +103,7 @@ While the suite contains 30 scenarios, they are organized into **10 distinct sce
 
 > [!NOTE]
 > **Precision Note on Displayed Category Vectors & Confidence Intervals**:
-> The category-level paired differences ($D_k = C_k - A_k$) are evaluated using unrounded, full-precision floating point arithmetic (e.g., $TASK\_CONTINUATION = 341.0 - 64.666667 = +276.333333...$). All reported summary statistics—Mean Difference ($\bar{D} = +371.8333$), Sample SD ($s = 319.9267$), Standard Error ($SE = 101.1697$), and 95% Confidence Interval ($[142.9875, 600.6792]$, presented rounded to two decimals as $[142.99, 600.68]$ using $t_{\text{crit}} = 2.262$ at $df=9$)—are computed directly from these unrounded full-precision values rather than from rounded display strings. The table below exposes the underlying values with four decimal places of precision to guarantee exact mathematical reproducibility:
+> The category-level paired differences ($D_k = C_k - A_k$) are evaluated using unrounded, full-precision floating point arithmetic (e.g., $TASK\_CONTINUATION = 341.0 - 64.666667 = +276.333333...$). All reported summary statistics—Mean Difference ($\bar{D} = +371.8333$), Sample SD ($s = 319.9267$), Standard Error ($SE = 101.1697$), and Exact 95% Confidence Interval ($[142.9715875613, 600.6950791054]$, presented rounded to two decimals as $[142.97, 600.70]$ using exact $t_{\text{crit}} = 2.262157162798205$ at $df=9$)—are computed directly from these unrounded full-precision values rather than from rounded display strings. The table below exposes the underlying values with four decimal places of precision to guarantee exact mathematical reproducibility:
 
 | Category ($k$) | Task Success Diff | Partial Credit Diff | Token Overhead ($C - A$) | Explanations Diff ($C - A$) | Decisions Diff ($C - A$) |
 |---|---:|---:|---:|---:|---:|
@@ -182,8 +182,8 @@ All four retrieval strategies were evaluated on the identical query set across a
 
 | **Vector (Cosine)** | 0.641 | 0.767 | 0.676 | 0.560 | 0.800 | 0.659 | 0.717 | 0.729 | 0.259 |
 | **Knowledge Graph (Traversal)** | 0.589 | 0.633 | 0.604 | 0.767 | 0.657 | 0.708 | 0.633 | 0.631 | 0.178 |
-| **Hybrid (RRF Fusion)** | 0.661 | 0.767 | 0.698 | 0.519 | 0.800 | 0.629 | 0.717 | 0.732 | 0.306 |
-| **ML-Enhanced (Reranked)** | 0.668 | 0.800 | 0.709 | 0.537 | 0.829 | 0.652 | 0.733 | 0.750 | 0.299 |
+| **Hybrid (RRF Fusion)** | 0.668 | 0.800 | 0.709 | 0.537 | 0.829 | 0.652 | 0.723 | 0.745 | 0.299 |
+| **ML-Enhanced (Reranked)** | 0.674 | 0.833 | 0.720 | 0.556 | 0.857 | 0.674 | 0.740 | 0.763 | 0.292 |
 
 > [!NOTE]
 > **Interpretation of Retrieval Results**:
@@ -256,11 +256,11 @@ Every scenario was audited and explicitly labeled according to ground truth:
 ### 1. Does AI Brain reduce total context consumption?
 - **Direct Answer**: **No for single isolated queries, but yes compared to unbounded raw event replay in long sessions.**
 - For a single query, Condition C consumes **437.8 estimated tokens** compared to **65.9 estimated tokens** for Cold Start (+564.0% context overhead).
-- **Token Cost Direction & Overhead**: The category-level token difference is **+371.83 tokens** ($C - A$). Subtraction direction is defined as Condition C minus Condition A. A positive difference indicates that AI Brain consumes more tokens than Cold Start. This constitutes **additional token overhead**, not a performance improvement. Summary statistics are derived from unrounded full-precision category differences (mean = +371.8333, SE = 101.1697, 95% CI = [142.9875, 600.6792], presented as [142.99, 600.68] with critical t = 2.262 at df = 9).
+- **Token Cost Direction & Overhead**: The category-level token difference is **+371.83 tokens** ($C - A$). Subtraction direction is defined as Condition C minus Condition A. A positive difference indicates that AI Brain consumes more tokens than Cold Start. This constitutes **additional token overhead**, not a performance improvement. Summary statistics are derived from unrounded full-precision category differences (mean = +371.8333, SE = 101.1697, exact 95% CI = [142.9715875613, 600.6950791054], presented as [142.97, 600.70] with exact critical t = 2.262157162798205 at df = 9).
 - However, compared to Raw History (274.1 estimated tokens in early multi-turn sessions), Brain's budgeted context package bounds token growth, preventing transcript overflow as history expands.
 
 ### 2. Does it improve retrieval quality?
-- **Direct Answer**: **Yes**. Hybrid RRF Fusion achieves **Macro Precision@5 = 0.66**, **Recall@5 = 0.77**, and **F1 = 0.70** (Micro F1 = 0.63).
+- **Direct Answer**: **Yes**. Hybrid RRF Fusion achieves **Macro Precision@5 = 0.67**, **Recall@5 = 0.80**, and **F1 = 0.71** (Micro F1 = 0.65).
 - Grounding semantic vectors with Knowledge Graph relation paths prevents false-positive semantic associations.
 
 ### 3. Does it improve task continuation?

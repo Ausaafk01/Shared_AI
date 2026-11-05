@@ -126,6 +126,7 @@ class ClusterAwareStatisticalSummary:
     is_statistically_significant: bool
     notes: str
     category_differences: Tuple[float, ...] = ()  # Paired differences per category (C - A)
+    p_value: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -138,7 +139,12 @@ class ClusterAwareStatisticalSummary:
                 round(self.confidence_interval_95[0], 4),
                 round(self.confidence_interval_95[1], 4),
             ),
-            "t_statistic": round(self.t_statistic, 3),
+            "confidence_interval_95_exact": (
+                self.confidence_interval_95[0],
+                self.confidence_interval_95[1],
+            ),
+            "t_statistic": round(self.t_statistic, 4),
+            "p_value": round(self.p_value, 8),
             "degrees_of_freedom": self.degrees_of_freedom,
             "is_statistically_significant": self.is_statistically_significant,
             "notes": self.notes,
@@ -150,13 +156,82 @@ class BenchmarkStatistics:
     """Computes paired statistical tests, cluster-aware category tests, and effect sizes."""
 
     @staticmethod
-    def _t_critical(df: int) -> float:
-        table = {
-            1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571,
-            6: 2.447, 7: 2.365, 8: 2.306, 9: 2.262, 10: 2.228,
-            15: 2.131, 20: 2.086, 25: 2.060, 29: 2.045, 30: 2.042,
-        }
-        return table.get(df, 1.96)
+    def _t_critical(df: int, alpha: float = 0.05) -> float:
+        """
+        Exact two-tailed Student's t critical value for significance level alpha (default alpha=0.05 for 95% CI).
+        Computed to IEEE 754 double precision (for df=9, alpha=0.05: 2.262157162798205).
+        """
+        if alpha == 0.05:
+            exact_table_95 = {
+                1: 12.7062047361747,
+                2: 4.30265272974944,
+                3: 3.18244630528373,
+                4: 2.77644510519773,
+                5: 2.57058183563636,
+                6: 2.44691185114497,
+                7: 2.36462425159278,
+                8: 2.30600413520417,
+                9: 2.262157162798205,
+                10: 2.22813885198627,
+                11: 2.20098516009165,
+                12: 2.17881282966720,
+                13: 2.16036865646283,
+                14: 2.14478668791783,
+                15: 2.13144954555932,
+                16: 2.11990529922131,
+                17: 2.10981557783330,
+                18: 2.10092204024102,
+                19: 2.09302405440833,
+                20: 2.08596344726584,
+                21: 2.07961384472765,
+                22: 2.07387306790403,
+                23: 2.06865761041906,
+                24: 2.06389856162802,
+                25: 2.05953855275330,
+                26: 2.05552943864288,
+                27: 2.05183051648028,
+                28: 2.04840714179525,
+                29: 2.045229642132719,
+                30: 2.04227245630124,
+            }
+            if df in exact_table_95:
+                return exact_table_95[df]
+
+        coeff = math.gamma((df + 1) / 2) / (math.sqrt(df * math.pi) * math.gamma(df / 2))
+        target = 1.0 - alpha / 2.0
+        t = 1.96 if df > 30 else (math.sqrt(df * ((0.5 / (alpha / 2)) ** (2 / df) - 1)) if df <= 2 else 2.0)
+        for _ in range(25):
+            n_steps = 4000
+            h = t / n_steps
+            s = 1.0 + (1.0 + t * t / df) ** (-(df + 1) / 2)
+            for i in range(1, n_steps):
+                cur_t = i * h
+                w = 4 if i % 2 == 1 else 2
+                s += w * (1.0 + cur_t * cur_t / df) ** (-(df + 1) / 2)
+            cdf = 0.5 + coeff * (h / 3) * s
+            pdf = coeff * (1.0 + t * t / df) ** (-(df + 1) / 2)
+            diff = cdf - target
+            if abs(diff) < 1e-15:
+                break
+            t -= diff / pdf
+        return t
+
+    @staticmethod
+    def _t_p_value(t_stat: float, df: int) -> float:
+        """Computes exact two-tailed Student's t p-value."""
+        t = abs(t_stat)
+        if t == 0.0 or df <= 0:
+            return 1.0
+        coeff = math.gamma((df + 1) / 2) / (math.sqrt(df * math.pi) * math.gamma(df / 2))
+        n_steps = 10000
+        h = t / n_steps
+        s = 1.0 + (1.0 + t * t / df) ** (-(df + 1) / 2)
+        for i in range(1, n_steps):
+            cur_t = i * h
+            w = 4 if i % 2 == 1 else 2
+            s += w * (1.0 + cur_t * cur_t / df) ** (-(df + 1) / 2)
+        cdf = 0.5 + coeff * (h / 3) * s
+        return max(0.0, min(1.0, 2.0 * (1.0 - cdf)))
 
     @classmethod
     def compute_mcnemar_test(
@@ -259,6 +334,7 @@ class BenchmarkStatistics:
         t_crit = cls._t_critical(df)
         ci = (cluster_mean_diff - t_crit * se_cluster, cluster_mean_diff + t_crit * se_cluster)
         t_stat = (cluster_mean_diff / se_cluster) if se_cluster > 0 else 0.0
+        p_val = cls._t_p_value(t_stat, df)
         is_sig = (ci[0] > 0 and ci[1] > 0) or (ci[0] < 0 and ci[1] < 0)
 
         notes = (
@@ -267,7 +343,7 @@ class BenchmarkStatistics:
             f"Exploratory and conditional on treating the {k_clusters} categories as independent clusters; "
             f"these results do not establish general performance across real-world agent tasks, "
             f"and statistical significance does not constitute proof of general superiority. "
-            f"Between-category SE={se_cluster:.4f}, t={t_stat:.3f}. Difference is "
+            f"Between-category SE={se_cluster:.4f}, t={t_stat:.4f}, p={p_val:.4e}. Difference is "
             f"{'statistically significant (p < 0.05)' if is_sig else 'not statistically significant'}."
         )
 
@@ -279,6 +355,7 @@ class BenchmarkStatistics:
             cluster_std_error=se_cluster,
             confidence_interval_95=ci,
             t_statistic=t_stat,
+            p_value=p_val,
             degrees_of_freedom=df,
             is_statistically_significant=is_sig,
             notes=notes,

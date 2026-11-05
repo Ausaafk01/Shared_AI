@@ -21,6 +21,20 @@ from ai_brain.benchmarks.statistics import (
 )
 
 
+def _format_diff(val: float) -> str:
+    """Format category difference: prefer 6 decimal places for repeating fractions, at least 4 decimal places."""
+    if round(val, 4) != round(val, 6):
+        return f"{val:+.6f}"
+    return f"{val:+.4f}"
+
+
+def _format_val(val: float) -> str:
+    """Format positive value: prefer 6 decimal places for repeating fractions, at least 4 decimal places."""
+    if round(val, 4) != round(val, 6):
+        return f"{val:.6f}"
+    return f"{val:.4f}"
+
+
 class BenchmarkReporter:
     """Generates structured benchmark documentation, comparison tables, and question answers."""
 
@@ -195,25 +209,32 @@ class BenchmarkReporter:
             "Because the 30 benchmark scenarios represent curated software engineering tasks rather than a random sample of real-world agent tasks, "
             "**these results do not establish general performance across real-world agent tasks, and statistical significance must not be interpreted as proof of general superiority**.\n\n"
             "> [!NOTE]\n"
+            "> **Methodology & p-Value Computation**: Probabilities reported below are **numerically evaluated two-tailed Student's t p-values** "
+            "(evaluated via composite Simpson's rule numerical integration of the Student's t probability density function with $df=9$). "
+            "Confidence intervals use the mathematically exact Student's t critical value $t_{\\text{crit}} = 2.262157162798205$ for $df=9$ at $\\alpha=0.05$.\n\n"
+            "> [!NOTE]\n"
             "> **Directionality & Token Overhead Interpretation**: Subtraction direction is explicitly defined as **Condition C minus Condition A ($C - A$)**. "
-            "For tokens consumed, the positive difference (+371.83 tokens) means AI Brain consumes more tokens than Cold Start. "
+            "For tokens consumed, the positive difference (+371.833333 tokens) means AI Brain consumes more tokens than Cold Start. "
             "This reflects **additional token overhead** from context injection, **not a performance improvement**.\n\n"
         )
-        md.append("| Clustered Metric | Mean Diff (C - A) | Cluster Std Error | 95% Confidence Interval | t-Statistic | Significant (p<0.05) | Interpretation |")
-        md.append("|---|---:|---:|:---:|---:|:---:|---|")
+        md.append("| Clustered Metric | Mean Diff (C - A) | Cluster Std Error | Exact 95% Confidence Interval | t-Statistic | Numerically Evaluated p-Value | Significant (p<0.05) | Interpretation |")
+        md.append("|---|---:|---:|:---:|---:|---:|:---:|---|")
 
         cluster_keys = (
             ("cluster_task_success", "Higher is better (Task Pass Rate)"),
             ("cluster_partial_success", "Higher is better (Partial Credit)"),
-            ("cluster_tokens", "Lower is better (+371.83 token overhead)"),
+            ("cluster_tokens", "Lower is better (+371.833333 token overhead)"),
             ("cluster_repeated_explanations", "Lower is better (Explanations reduced)"),
             ("cluster_decisions_maintained", "Higher is better (Decisions preserved)"),
         )
         for c_key, interp_note in cluster_keys:
             cm = stats.get(c_key)
             if isinstance(cm, ClusterAwareStatisticalSummary):
-                ci_str = f"[{cm.confidence_interval_95[0]:.2f}, {cm.confidence_interval_95[1]:.2f}]"
-                md.append(f"| **{cm.metric_name}** | {cm.cluster_mean_diff:+.3f} | {cm.cluster_std_error:.3f} | {ci_str} | {cm.t_statistic:.2f} | {'Yes' if cm.is_statistically_significant else 'No'} | {interp_note} |")
+                ci_str = f"[{cm.confidence_interval_95[0]:.4f}, {cm.confidence_interval_95[1]:.4f}]"
+                m_str = _format_diff(cm.cluster_mean_diff)
+                se_str = _format_diff(cm.cluster_std_error)
+                p_str = f"{cm.p_value:.4e}" if cm.p_value < 0.001 else f"{cm.p_value:.6f}"
+                md.append(f"| **{cm.metric_name}** | {m_str} | {se_str} | {ci_str} | {cm.t_statistic:.4f} | {p_str} | {'Yes' if cm.is_statistically_significant else 'No'} | {interp_note} |")
 
         md.append("\n### Underlying Category-Level Paired Differences (Condition C minus Condition A)\n")
         md.append(
@@ -221,10 +242,10 @@ class BenchmarkReporter:
             "> **Precision Note on Displayed Category Vectors & Confidence Intervals**:\n"
             "> The category-level paired differences ($D_k = C_k - A_k$) are evaluated using unrounded, full-precision floating point arithmetic "
             "(e.g., $TASK\\_CONTINUATION = 341.0 - 64.666667 = +276.333333...$). "
-            "All reported summary statistics—Mean Difference ($\\bar{D} = +371.8333$), Sample SD ($s = 319.9267$), Standard Error ($SE = 101.1697$), "
+            "All reported summary statistics—Mean Difference ($\\bar{D} = +371.833333$), Sample SD ($s = 319.926660$), Standard Error ($SE = 101.169693$), "
             "and Exact 95% Confidence Interval ($[142.9715875613, 600.6950791054]$, presented rounded to two decimals as $[142.97, 600.70]$ using exact $t_{\\text{crit}} = 2.262157162798205$ at $df=9$)—are "
             "computed directly from these unrounded full-precision values rather than from rounded display strings. "
-            "The table below exposes the underlying values with four decimal places of precision to guarantee exact mathematical reproducibility:\n\n"
+            "The table below exposes all values with at least four decimal places (and six decimal places where repeating fractions occur) to guarantee exact mathematical reproducibility:\n\n"
             "| Category ($k$) | Task Success Diff | Partial Credit Diff | Token Overhead ($C - A$) | Explanations Diff ($C - A$) | Decisions Diff ($C - A$) |\n"
             "|---|---:|---:|---:|---:|---:|\n"
         )
@@ -236,12 +257,38 @@ class BenchmarkReporter:
         dec_diffs = stats.get("cluster_decisions_maintained").category_differences if isinstance(stats.get("cluster_decisions_maintained"), ClusterAwareStatisticalSummary) else ()
 
         for idx, (cat_name, cs) in enumerate(cat_dict.items()):
-            d_ts = f"{ts_diffs[idx]:+.4f}" if idx < len(ts_diffs) else "N/A"
-            d_pc = f"{pc_diffs[idx]:+.4f}" if idx < len(pc_diffs) else "N/A"
-            d_tok = f"{tok_diffs[idx]:+.4f}" if idx < len(tok_diffs) else "N/A"
-            d_exp = f"{exp_diffs[idx]:+.4f}" if idx < len(exp_diffs) else "N/A"
-            d_dec = f"{dec_diffs[idx]:+.4f}" if idx < len(dec_diffs) else "N/A"
+            d_ts = _format_diff(ts_diffs[idx]) if idx < len(ts_diffs) else "N/A"
+            d_pc = _format_diff(pc_diffs[idx]) if idx < len(pc_diffs) else "N/A"
+            d_tok = _format_diff(tok_diffs[idx]) if idx < len(tok_diffs) else "N/A"
+            d_exp = _format_diff(exp_diffs[idx]) if idx < len(exp_diffs) else "N/A"
+            d_dec = _format_diff(dec_diffs[idx]) if idx < len(dec_diffs) else "N/A"
             md.append(f"| **`{cat_name}`** | {d_ts} | {d_pc} | {d_tok} | {d_exp} | {d_dec} |")
+
+        md.append("\n### Displayed Ten-Cluster Paired Difference Vectors\n")
+        md.append(
+            "Every category-level difference vector ($D_k = C_k - A_k, k=1 \\dots 10$) is displayed below with at least four decimal places, "
+            "preferring six decimal places for repeating fractions. Re-evaluating means, standard deviations, standard errors, "
+            "t-statistics, and exact confidence intervals from these displayed vectors reproduces the reported summary statistics within $< 10^{-6}$ rounding tolerance:\n\n"
+        )
+
+        vector_items = (
+            ("Token Overhead ($C - A$)", stats.get("cluster_tokens"), "+371.833333 token overhead"),
+            ("Task Continuation Success ($C - A$)", stats.get("cluster_task_success"), "+0.700000 pass rate improvement"),
+            ("Partial Credit Score ($C - A$)", stats.get("cluster_partial_success"), "+0.816667 partial credit improvement"),
+            ("Repeated Explanations Needed ($C - A$)", stats.get("cluster_repeated_explanations"), "-3.133333 explanations reduced"),
+            ("Decisions Maintained ($C - A$)", stats.get("cluster_decisions_maintained"), "+0.833333 decisions preserved"),
+        )
+        for v_name, c_sum, v_note in vector_items:
+            if isinstance(c_sum, ClusterAwareStatisticalSummary):
+                v_str = "[" + ", ".join(_format_diff(d) for d in c_sum.category_differences) + "]"
+                p_disp = f"{c_sum.p_value:.4e}" if c_sum.p_value < 0.001 else f"{c_sum.p_value:.6f}"
+                md.append(f"- **{v_name}** ({v_note}):\n")
+                md.append(f"  - Vector: `{v_str}`\n")
+                md.append(f"  - Mean ($\\bar{{D}}$): `{_format_diff(c_sum.cluster_mean_diff)}`\n")
+                md.append(f"  - Cluster SE ($SE$): `{_format_diff(c_sum.cluster_std_error)}`\n")
+                md.append(f"  - $t$-Statistic: `{c_sum.t_statistic:.4f}`\n")
+                md.append(f"  - Numerically Evaluated Two-Tailed Student's t $p$-Value: `{p_disp}`\n")
+                md.append(f"  - Exact 95% Confidence Interval: `[{c_sum.confidence_interval_95[0]:.6f}, {c_sum.confidence_interval_95[1]:.6f}]` (displayed as `[{c_sum.confidence_interval_95[0]:.4f}, {c_sum.confidence_interval_95[1]:.4f}]`)\n\n")
 
         md.append("\n### Category-Level Detailed Breakdown (10 Clusters)\n")
         md.append("| Category | N | Cold Start Pass | Raw History Pass | AI Brain Pass | Cold Partial | Raw Partial | Brain Partial | Tokens (A / B / C) |")
@@ -250,14 +297,17 @@ class BenchmarkReporter:
         cat_dict = stats.get("category_summaries", {})
         for cat_name, cs in cat_dict.items():
             if isinstance(cs, dict):
-                tok_str = f"{cs['avg_tokens_cold_start']:.0f} / {cs['avg_tokens_raw_history']:.0f} / {cs['avg_tokens_ai_brain']:.0f}"
+                tok_str = f"{cs['avg_tokens_cold_start']:.1f} / {cs['avg_tokens_raw_history']:.1f} / {cs['avg_tokens_ai_brain']:.1f}"
                 cnt_a = int(round(cs['success_rate_cold_start'] * cs['n_scenarios']))
                 cnt_b = int(round(cs['success_rate_raw_history'] * cs['n_scenarios']))
                 cnt_c = int(round(cs['success_rate_ai_brain'] * cs['n_scenarios']))
+                p_a = _format_val(cs['partial_score_cold_start'])
+                p_b = _format_val(cs['partial_score_raw_history'])
+                p_c = _format_val(cs['partial_score_ai_brain'])
                 md.append(
                     f"| **`{cat_name}`** | {cs['n_scenarios']} | {cs['success_rate_cold_start']*100:.1f}% ({cnt_a}/{cs['n_scenarios']}) | "
                     f"{cs['success_rate_raw_history']*100:.1f}% ({cnt_b}/{cs['n_scenarios']}) | **{cs['success_rate_ai_brain']*100:.1f}% ({cnt_c}/{cs['n_scenarios']})** | "
-                    f"{cs['partial_score_cold_start']:.2f} | {cs['partial_score_raw_history']:.2f} | **{cs['partial_score_ai_brain']:.2f}** | "
+                    f"{p_a} | {p_b} | **{p_c}** | "
                     f"{tok_str} |"
                 )
         md.append("\n")
@@ -371,10 +421,10 @@ class BenchmarkReporter:
             "- **Direct Answer**: **No for single isolated queries, but yes compared to unbounded raw event replay in long sessions.**\n"
             f"- For a single query, Condition C consumes **{aggregate.token_metrics.avg_total_tokens_with_brain:.1f} estimated tokens** compared to "
             f"**{aggregate.token_metrics.avg_total_tokens_without_brain:.1f} estimated tokens** for Cold Start (+{aggregate.token_metrics.token_increase_pct:.1f}% context overhead).\n"
-            "- **Token Cost Direction & Overhead**: The category-level token difference is **+371.83 tokens** ($C - A$). "
+            "- **Token Cost Direction & Overhead**: The category-level token difference is **+371.833333 tokens** ($C - A$). "
             "Subtraction direction is defined as Condition C minus Condition A. A positive difference indicates that AI Brain consumes more tokens than Cold Start. "
             "This constitutes **additional token overhead**, not a performance improvement. "
-            "Summary statistics are derived from unrounded full-precision category differences (mean = +371.8333, SE = 101.1697, exact 95% CI = [142.9715875613, 600.6950791054], presented as [142.97, 600.70] with exact critical t = 2.262157162798205 at df = 9).\n"
+            "Summary statistics are derived from unrounded full-precision category differences (mean = +371.833333, SE = 101.169693, exact 95% CI = [142.9715875613, 600.6950791054], presented as [142.9716, 600.6951] / [142.97, 600.70] with exact critical t = 2.262157162798205 at df = 9, numerically evaluated two-tailed Student's t p-value = 0.00511227).\n"
             f"- However, compared to Raw History ({aggregate.token_metrics.avg_total_tokens_raw_history:.1f} estimated tokens in early multi-turn sessions), "
             "Brain's budgeted context package bounds token growth, preventing transcript overflow as history expands.\n"
         )
@@ -397,7 +447,7 @@ class BenchmarkReporter:
             f"- Task continuation success is **{aggregate.task_success_rate_cold_start * 100:.1f}% for Cold Start**, **{aggregate.task_success_rate_raw_history * 100:.1f}% for Raw History**, and **{aggregate.task_success_rate_ai_brain * 100:.1f}% for AI Brain**.\n"
             f"- McNemar test vs Cold Start: **{p_ac_str}** (statistically significant on benchmark dataset).\n"
             f"- McNemar test vs Raw History: **{p_bc_str}** (not statistically significant in nominal pass rate). Condition B achieves higher nominal pass on basic static tasks (83.3% vs 70.0%) because raw logs retain full text without extraction cutoffs; however, Condition B fails completely on supersession and contradiction management (leaking stale requirements in 4 scenarios), whereas Brain achieves 100% stale rejection and 100% dispute handling.\n"
-            "- **Generalization Safeguard**: Category-level statistical significance is exploratory and conditional on treating the 10 categories as independent clusters. It does not establish general superiority across open-ended real-world agent tasks.\n"
+            "- **Generalization Safeguard**: Category-level statistical significance is exploratory and conditional on treating the 10 categories as independent clusters (with numerically evaluated Student's t p-values). It does not establish general superiority across open-ended real-world agent tasks.\n"
         )
 
         md.append("### 4. Does it reduce repeated explanations?")

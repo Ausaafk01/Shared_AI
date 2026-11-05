@@ -1,6 +1,6 @@
 # AI Brain — Phase 4 System Benchmarking & Comparative Evaluation Report
 
-**Generated**: 2026-11-05 08:45:07 UTC
+**Generated**: 2026-11-05 08:57:49 UTC
 
 **Total Scenarios Evaluated**: 30 realistic multi-session test scenarios (3 per category across 10 categories)
 
@@ -37,7 +37,7 @@ To isolate the causal value of persistent memory architectures from raw context 
 | **Repeated Explanations Needed** | 105 facts | 3 facts | 11 facts | **-94 avoided** | **--8 avoided** |
 | **Average Total Tokens / Query** | 65.9 est. tok | 274.1 est. tok | 437.8 est. tok | ++371.8 (++564.0%) | +163.7 (+59.7%) |
 | **Conflict Detection (TP / FP)** | 0 / 0 (Unaware) | 0 / 0 (Unaware) | 1 TP / 0 FP | 100% Precision | 100% Precision |
-| **Retrieval Accuracy (K=5)** | N/A (Stateless) | N/A (Unindexed Log) | Macro F1 = 0.71 | Ground Truth Validated | Micro F1 = 0.65 |
+| **Retrieval Accuracy (K=5)** | N/A (Stateless) | N/A (Unindexed Log) | Macro F1 = 0.70 | Ground Truth Validated | Micro F1 = 0.63 |
 
 ## 3. Statistical Analysis & Cluster-Aware Interpretation
 
@@ -88,51 +88,135 @@ While the suite contains 30 scenarios, they are organized into **10 distinct sce
 > **Statistical Inference Qualification**: The category-level t-tests, p-values, and confidence intervals below are **exploratory and conditional on treating the ten categories as independent clusters**. Because the 30 benchmark scenarios represent curated software engineering tasks rather than a random sample of real-world agent tasks, **these results do not establish general performance across real-world agent tasks, and statistical significance must not be interpreted as proof of general superiority**.
 
 > [!NOTE]
-> **Directionality & Token Overhead Interpretation**: Subtraction direction is explicitly defined as **Condition C minus Condition A ($C - A$)**. For tokens consumed, the positive difference (+371.83 tokens) means AI Brain consumes more tokens than Cold Start. This reflects **additional token overhead** from context injection, **not a performance improvement**.
+> **Methodology & p-Value Computation**: Probabilities reported below are **numerically evaluated two-tailed Student's t p-values** (evaluated via composite Simpson's rule numerical integration of the Student's t probability density function with $df=9$). Confidence intervals use the mathematically exact Student's t critical value $t_{\text{crit}} = 2.262157162798205$ for $df=9$ at $\alpha=0.05$.
+
+> [!NOTE]
+> **Directionality & Token Overhead Interpretation**: Subtraction direction is explicitly defined as **Condition C minus Condition A ($C - A$)**. For tokens consumed, the positive difference (+371.833333 tokens) means AI Brain consumes more tokens than Cold Start. This reflects **additional token overhead** from context injection, **not a performance improvement**.
 
 
-| Clustered Metric | Mean Diff (C - A) | Cluster Std Error | 95% Confidence Interval | t-Statistic | Significant (p<0.05) | Interpretation |
-|---|---:|---:|:---:|---:|:---:|---|
-| **Task Continuation Success (Cluster-Stratified, df=9)** | +0.700 | 0.105 | [0.46, 0.94] | 6.68 | Yes | Higher is better (Task Pass Rate) |
-| **Partial Credit Score (Cluster-Stratified, df=9)** | +0.817 | 0.090 | [0.61, 1.02] | 9.08 | Yes | Higher is better (Partial Credit) |
-| **Total Tokens Consumed Overhead (Cluster-Stratified, df=9)** | +371.833 | 101.170 | [142.97, 600.70] | 3.68 | Yes | Lower is better (+371.83 token overhead) |
-| **Repeated Explanations Needed (Cluster-Stratified, df=9)** | -3.133 | 0.477 | [-4.21, -2.05] | -6.57 | Yes | Lower is better (Explanations reduced) |
-| **Decisions Maintained (Cluster-Stratified, df=9)** | +0.833 | 0.143 | [0.51, 1.16] | 5.84 | Yes | Higher is better (Decisions preserved) |
+| Clustered Metric | Mean Diff (C - A) | Cluster Std Error | Exact 95% Confidence Interval | t-Statistic | Numerically Evaluated p-Value | Significant (p<0.05) | Interpretation |
+|---|---:|---:|:---:|---:|---:|:---:|---|
+| **Task Continuation Success (Cluster-Stratified, df=9)** | +0.7000 | +0.104822 | [0.4629, 0.9371] | 6.6780 | 9.0787e-05 | Yes | Higher is better (Task Pass Rate) |
+| **Partial Credit Score (Cluster-Stratified, df=9)** | +0.816667 | +0.089899 | [0.6133, 1.0200] | 9.0843 | 7.9106e-06 | Yes | Higher is better (Partial Credit) |
+| **Total Tokens Consumed Overhead (Cluster-Stratified, df=9)** | +371.833333 | +101.169693 | [142.9716, 600.6951] | 3.6753 | 0.005112 | Yes | Lower is better (+371.833333 token overhead) |
+| **Repeated Explanations Needed (Cluster-Stratified, df=9)** | -3.133333 | +0.477131 | [-4.2127, -2.0540] | -6.5670 | 1.0312e-04 | Yes | Lower is better (Explanations reduced) |
+| **Decisions Maintained (Cluster-Stratified, df=9)** | +0.833333 | +0.142725 | [0.5105, 1.1562] | 5.8387 | 2.4720e-04 | Yes | Higher is better (Decisions preserved) |
 
 ### Underlying Category-Level Paired Differences (Condition C minus Condition A)
 
 > [!NOTE]
 > **Precision Note on Displayed Category Vectors & Confidence Intervals**:
-> The category-level paired differences ($D_k = C_k - A_k$) are evaluated using unrounded, full-precision floating point arithmetic (e.g., $TASK\_CONTINUATION = 341.0 - 64.666667 = +276.333333...$). All reported summary statistics—Mean Difference ($\bar{D} = +371.8333$), Sample SD ($s = 319.9267$), Standard Error ($SE = 101.1697$), and Exact 95% Confidence Interval ($[142.9715875613, 600.6950791054]$, presented rounded to two decimals as $[142.97, 600.70]$ using exact $t_{\text{crit}} = 2.262157162798205$ at $df=9$)—are computed directly from these unrounded full-precision values rather than from rounded display strings. The table below exposes the underlying values with four decimal places of precision to guarantee exact mathematical reproducibility:
+> The category-level paired differences ($D_k = C_k - A_k$) are evaluated using unrounded, full-precision floating point arithmetic (e.g., $TASK\_CONTINUATION = 341.0 - 64.666667 = +276.333333...$). All reported summary statistics—Mean Difference ($\bar{D} = +371.833333$), Sample SD ($s = 319.926660$), Standard Error ($SE = 101.169693$), and Exact 95% Confidence Interval ($[142.9715875613, 600.6950791054]$, presented rounded to two decimals as $[142.97, 600.70]$ using exact $t_{\text{crit}} = 2.262157162798205$ at $df=9$)—are computed directly from these unrounded full-precision values rather than from rounded display strings. The table below exposes all values with at least four decimal places (and six decimal places where repeating fractions occur) to guarantee exact mathematical reproducibility:
 
 | Category ($k$) | Task Success Diff | Partial Credit Diff | Token Overhead ($C - A$) | Explanations Diff ($C - A$) | Decisions Diff ($C - A$) |
 |---|---:|---:|---:|---:|---:|
 
-| **`TASK_CONTINUATION`** | +0.6667 | +0.8833 | +276.3333 | -3.3333 | +1.0000 |
-| **`ARCHITECTURAL_DECISION`** | +1.0000 | +1.0000 | +361.0000 | -4.3333 | +1.3333 |
-| **`TECHNICAL_CONSTRAINTS`** | +0.6667 | +0.9667 | +350.6667 | -4.6667 | +1.0000 |
-| **`UPDATED_REQUIREMENTS`** | +1.0000 | +1.0000 | +210.0000 | -4.3333 | +1.0000 |
-| **`CONTRADICTORY_CLAIMS`** | +0.3333 | +0.3917 | +239.0000 | -0.3333 | +0.0000 |
-| **`AGENT_SWITCHING`** | +0.6667 | +0.8833 | +286.0000 | -3.3333 | +1.0000 |
-| **`SESSION_INTERRUPTION`** | +0.0000 | +0.2000 | +157.3333 | -0.6667 | +0.0000 |
-| **`REPEATED_EXPLANATION`** | +1.0000 | +1.0000 | +288.3333 | -3.6667 | +1.0000 |
-| **`NEEDLE_IN_HAYSTACK`** | +0.6667 | +0.8417 | +1266.0000 | -2.6667 | +1.0000 |
-| **`STALE_KNOWLEDGE_REJECTION`** | +1.0000 | +1.0000 | +283.6667 | -4.0000 | +1.0000 |
+| **`TASK_CONTINUATION`** | +0.666667 | +0.883333 | +276.333333 | -3.333333 | +1.0000 |
+| **`ARCHITECTURAL_DECISION`** | +1.0000 | +1.0000 | +361.0000 | -4.333333 | +1.333333 |
+| **`TECHNICAL_CONSTRAINTS`** | +0.666667 | +0.966667 | +350.666667 | -4.666667 | +1.0000 |
+| **`UPDATED_REQUIREMENTS`** | +1.0000 | +1.0000 | +210.0000 | -4.333333 | +1.0000 |
+| **`CONTRADICTORY_CLAIMS`** | +0.333333 | +0.391667 | +239.0000 | -0.333333 | +0.0000 |
+| **`AGENT_SWITCHING`** | +0.666667 | +0.883333 | +286.0000 | -3.333333 | +1.0000 |
+| **`SESSION_INTERRUPTION`** | +0.0000 | +0.2000 | +157.333333 | -0.666667 | +0.0000 |
+| **`REPEATED_EXPLANATION`** | +1.0000 | +1.0000 | +288.333333 | -3.666667 | +1.0000 |
+| **`NEEDLE_IN_HAYSTACK`** | +0.666667 | +0.841667 | +1266.0000 | -2.666667 | +1.0000 |
+| **`STALE_KNOWLEDGE_REJECTION`** | +1.0000 | +1.0000 | +283.666667 | -4.0000 | +1.0000 |
+
+### Displayed Ten-Cluster Paired Difference Vectors
+
+Every category-level difference vector ($D_k = C_k - A_k, k=1 \dots 10$) is displayed below with at least four decimal places, preferring six decimal places for repeating fractions. Re-evaluating means, standard deviations, standard errors, t-statistics, and exact confidence intervals from these displayed vectors reproduces the reported summary statistics within $< 10^{-6}$ rounding tolerance:
+
+
+- **Token Overhead ($C - A$)** (+371.833333 token overhead):
+
+  - Vector: `[+276.333333, +361.0000, +350.666667, +210.0000, +239.0000, +286.0000, +157.333333, +288.333333, +1266.0000, +283.666667]`
+
+  - Mean ($\bar{D}$): `+371.833333`
+
+  - Cluster SE ($SE$): `+101.169693`
+
+  - $t$-Statistic: `3.6753`
+
+  - Numerically Evaluated Two-Tailed Student's t $p$-Value: `0.005112`
+
+  - Exact 95% Confidence Interval: `[142.971588, 600.695079]` (displayed as `[142.9716, 600.6951]`)
+
+
+- **Task Continuation Success ($C - A$)** (+0.700000 pass rate improvement):
+
+  - Vector: `[+0.666667, +1.0000, +0.666667, +1.0000, +0.333333, +0.666667, +0.0000, +1.0000, +0.666667, +1.0000]`
+
+  - Mean ($\bar{D}$): `+0.7000`
+
+  - Cluster SE ($SE$): `+0.104822`
+
+  - $t$-Statistic: `6.6780`
+
+  - Numerically Evaluated Two-Tailed Student's t $p$-Value: `9.0787e-05`
+
+  - Exact 95% Confidence Interval: `[0.462876, 0.937124]` (displayed as `[0.4629, 0.9371]`)
+
+
+- **Partial Credit Score ($C - A$)** (+0.816667 partial credit improvement):
+
+  - Vector: `[+0.883333, +1.0000, +0.966667, +1.0000, +0.391667, +0.883333, +0.2000, +1.0000, +0.841667, +1.0000]`
+
+  - Mean ($\bar{D}$): `+0.816667`
+
+  - Cluster SE ($SE$): `+0.089899`
+
+  - $t$-Statistic: `9.0843`
+
+  - Numerically Evaluated Two-Tailed Student's t $p$-Value: `7.9106e-06`
+
+  - Exact 95% Confidence Interval: `[0.613302, 1.020032]` (displayed as `[0.6133, 1.0200]`)
+
+
+- **Repeated Explanations Needed ($C - A$)** (-3.133333 explanations reduced):
+
+  - Vector: `[-3.333333, -4.333333, -4.666667, -4.333333, -0.333333, -3.333333, -0.666667, -3.666667, -2.666667, -4.0000]`
+
+  - Mean ($\bar{D}$): `-3.133333`
+
+  - Cluster SE ($SE$): `+0.477131`
+
+  - $t$-Statistic: `-6.5670`
+
+  - Numerically Evaluated Two-Tailed Student's t $p$-Value: `1.0312e-04`
+
+  - Exact 95% Confidence Interval: `[-4.212679, -2.053987]` (displayed as `[-4.2127, -2.0540]`)
+
+
+- **Decisions Maintained ($C - A$)** (+0.833333 decisions preserved):
+
+  - Vector: `[+1.0000, +1.333333, +1.0000, +1.0000, +0.0000, +1.0000, +0.0000, +1.0000, +1.0000, +1.0000]`
+
+  - Mean ($\bar{D}$): `+0.833333`
+
+  - Cluster SE ($SE$): `+0.142725`
+
+  - $t$-Statistic: `5.8387`
+
+  - Numerically Evaluated Two-Tailed Student's t $p$-Value: `2.4720e-04`
+
+  - Exact 95% Confidence Interval: `[0.510467, 1.156199]` (displayed as `[0.5105, 1.1562]`)
+
+
 
 ### Category-Level Detailed Breakdown (10 Clusters)
 
 | Category | N | Cold Start Pass | Raw History Pass | AI Brain Pass | Cold Partial | Raw Partial | Brain Partial | Tokens (A / B / C) |
 |---|:---:|---:|---:|---:|---:|---:|---:|:---:|
-| **`TASK_CONTINUATION`** | 3 | 0.0% (0/3) | 100.0% (3/3) | **66.7% (2/3)** | 0.00 | 1.00 | **0.88** | 65 / 247 / 341 |
-| **`ARCHITECTURAL_DECISION`** | 3 | 0.0% (0/3) | 100.0% (3/3) | **100.0% (3/3)** | 0.00 | 1.00 | **1.00** | 69 / 231 / 430 |
-| **`TECHNICAL_CONSTRAINTS`** | 3 | 0.0% (0/3) | 100.0% (3/3) | **66.7% (2/3)** | 0.00 | 1.00 | **0.97** | 70 / 214 / 420 |
-| **`UPDATED_REQUIREMENTS`** | 3 | 0.0% (0/3) | 66.7% (2/3) | **100.0% (3/3)** | 0.00 | 0.78 | **1.00** | 75 / 220 / 285 |
-| **`CONTRADICTORY_CLAIMS`** | 3 | 0.0% (0/3) | 33.3% (1/3) | **33.3% (1/3)** | 0.22 | 0.33 | **0.61** | 67 / 159 / 306 |
-| **`AGENT_SWITCHING`** | 3 | 0.0% (0/3) | 100.0% (3/3) | **66.7% (2/3)** | 0.00 | 1.00 | **0.88** | 68 / 259 / 354 |
-| **`SESSION_INTERRUPTION`** | 3 | 0.0% (0/3) | 100.0% (3/3) | **0.0% (0/3)** | 0.45 | 1.00 | **0.65** | 55 / 183 / 212 |
-| **`REPEATED_EXPLANATION`** | 3 | 0.0% (0/3) | 100.0% (3/3) | **100.0% (3/3)** | 0.00 | 1.00 | **1.00** | 70 / 192 / 358 |
-| **`NEEDLE_IN_HAYSTACK`** | 3 | 0.0% (0/3) | 100.0% (3/3) | **66.7% (2/3)** | 0.00 | 1.00 | **0.84** | 66 / 796 / 1332 |
-| **`STALE_KNOWLEDGE_REJECTION`** | 3 | 0.0% (0/3) | 33.3% (1/3) | **100.0% (3/3)** | 0.00 | 0.55 | **1.00** | 56 / 239 / 340 |
+| **`TASK_CONTINUATION`** | 3 | 0.0% (0/3) | 100.0% (3/3) | **66.7% (2/3)** | 0.0000 | 1.0000 | **0.8830** | 64.7 / 247.0 / 341.0 |
+| **`ARCHITECTURAL_DECISION`** | 3 | 0.0% (0/3) | 100.0% (3/3) | **100.0% (3/3)** | 0.0000 | 1.0000 | **1.0000** | 69.0 / 231.3 / 430.0 |
+| **`TECHNICAL_CONSTRAINTS`** | 3 | 0.0% (0/3) | 100.0% (3/3) | **66.7% (2/3)** | 0.0000 | 1.0000 | **0.9670** | 69.7 / 214.3 / 420.3 |
+| **`UPDATED_REQUIREMENTS`** | 3 | 0.0% (0/3) | 66.7% (2/3) | **100.0% (3/3)** | 0.0000 | 0.7750 | **1.0000** | 75.0 / 220.3 / 285.0 |
+| **`CONTRADICTORY_CLAIMS`** | 3 | 0.0% (0/3) | 33.3% (1/3) | **33.3% (1/3)** | 0.2170 | 0.3330 | **0.6080** | 66.7 / 159.3 / 305.7 |
+| **`AGENT_SWITCHING`** | 3 | 0.0% (0/3) | 100.0% (3/3) | **66.7% (2/3)** | 0.0000 | 1.0000 | **0.8830** | 67.7 / 258.7 / 353.7 |
+| **`SESSION_INTERRUPTION`** | 3 | 0.0% (0/3) | 100.0% (3/3) | **0.0% (0/3)** | 0.4500 | 1.0000 | **0.6500** | 54.7 / 183.3 / 212.0 |
+| **`REPEATED_EXPLANATION`** | 3 | 0.0% (0/3) | 100.0% (3/3) | **100.0% (3/3)** | 0.0000 | 1.0000 | **1.0000** | 69.7 / 192.0 / 358.0 |
+| **`NEEDLE_IN_HAYSTACK`** | 3 | 0.0% (0/3) | 100.0% (3/3) | **66.7% (2/3)** | 0.0000 | 1.0000 | **0.8420** | 66.3 / 795.7 / 1332.3 |
+| **`STALE_KNOWLEDGE_REJECTION`** | 3 | 0.0% (0/3) | 33.3% (1/3) | **100.0% (3/3)** | 0.0000 | 0.5500 | **1.0000** | 56.0 / 238.7 / 339.7 |
 
 
 ## 4. Reconciled Token Accounting & Context Formatting Audit
@@ -182,8 +266,8 @@ All four retrieval strategies were evaluated on the identical query set across a
 
 | **Vector (Cosine)** | 0.641 | 0.767 | 0.676 | 0.560 | 0.800 | 0.659 | 0.717 | 0.729 | 0.259 |
 | **Knowledge Graph (Traversal)** | 0.589 | 0.633 | 0.604 | 0.767 | 0.657 | 0.708 | 0.633 | 0.631 | 0.178 |
-| **Hybrid (RRF Fusion)** | 0.668 | 0.800 | 0.709 | 0.537 | 0.829 | 0.652 | 0.723 | 0.745 | 0.299 |
-| **ML-Enhanced (Reranked)** | 0.674 | 0.833 | 0.720 | 0.556 | 0.857 | 0.674 | 0.740 | 0.763 | 0.292 |
+| **Hybrid (RRF Fusion)** | 0.661 | 0.767 | 0.698 | 0.519 | 0.800 | 0.629 | 0.717 | 0.732 | 0.306 |
+| **ML-Enhanced (Reranked)** | 0.668 | 0.800 | 0.709 | 0.537 | 0.829 | 0.652 | 0.733 | 0.750 | 0.299 |
 
 > [!NOTE]
 > **Interpretation of Retrieval Results**:
@@ -256,11 +340,11 @@ Every scenario was audited and explicitly labeled according to ground truth:
 ### 1. Does AI Brain reduce total context consumption?
 - **Direct Answer**: **No for single isolated queries, but yes compared to unbounded raw event replay in long sessions.**
 - For a single query, Condition C consumes **437.8 estimated tokens** compared to **65.9 estimated tokens** for Cold Start (+564.0% context overhead).
-- **Token Cost Direction & Overhead**: The category-level token difference is **+371.83 tokens** ($C - A$). Subtraction direction is defined as Condition C minus Condition A. A positive difference indicates that AI Brain consumes more tokens than Cold Start. This constitutes **additional token overhead**, not a performance improvement. Summary statistics are derived from unrounded full-precision category differences (mean = +371.8333, SE = 101.1697, exact 95% CI = [142.9715875613, 600.6950791054], presented as [142.97, 600.70] with exact critical t = 2.262157162798205 at df = 9).
+- **Token Cost Direction & Overhead**: The category-level token difference is **+371.833333 tokens** ($C - A$). Subtraction direction is defined as Condition C minus Condition A. A positive difference indicates that AI Brain consumes more tokens than Cold Start. This constitutes **additional token overhead**, not a performance improvement. Summary statistics are derived from unrounded full-precision category differences (mean = +371.833333, SE = 101.169693, exact 95% CI = [142.9715875613, 600.6950791054], presented as [142.9716, 600.6951] / [142.97, 600.70] with exact critical t = 2.262157162798205 at df = 9, numerically evaluated two-tailed Student's t p-value = 0.00511227).
 - However, compared to Raw History (274.1 estimated tokens in early multi-turn sessions), Brain's budgeted context package bounds token growth, preventing transcript overflow as history expands.
 
 ### 2. Does it improve retrieval quality?
-- **Direct Answer**: **Yes**. Hybrid RRF Fusion achieves **Macro Precision@5 = 0.67**, **Recall@5 = 0.80**, and **F1 = 0.71** (Micro F1 = 0.65).
+- **Direct Answer**: **Yes**. Hybrid RRF Fusion achieves **Macro Precision@5 = 0.66**, **Recall@5 = 0.77**, and **F1 = 0.70** (Micro F1 = 0.63).
 - Grounding semantic vectors with Knowledge Graph relation paths prevents false-positive semantic associations.
 
 ### 3. Does it improve task continuation?
@@ -268,7 +352,7 @@ Every scenario was audited and explicitly labeled according to ground truth:
 - Task continuation success is **0.0% for Cold Start**, **83.3% for Raw History**, and **70.0% for AI Brain**.
 - McNemar test vs Cold Start: **p = 9.54e-07 (p < 0.001)** (statistically significant on benchmark dataset).
 - McNemar test vs Raw History: **p = 0.3877 (p = 0.39)** (not statistically significant in nominal pass rate). Condition B achieves higher nominal pass on basic static tasks (83.3% vs 70.0%) because raw logs retain full text without extraction cutoffs; however, Condition B fails completely on supersession and contradiction management (leaking stale requirements in 4 scenarios), whereas Brain achieves 100% stale rejection and 100% dispute handling.
-- **Generalization Safeguard**: Category-level statistical significance is exploratory and conditional on treating the 10 categories as independent clusters. It does not establish general superiority across open-ended real-world agent tasks.
+- **Generalization Safeguard**: Category-level statistical significance is exploratory and conditional on treating the 10 categories as independent clusters (with numerically evaluated Student's t p-values). It does not establish general superiority across open-ended real-world agent tasks.
 
 ### 4. Does it reduce repeated explanations?
 - **Direct Answer**: **Yes**. Condition A required **105 manual user explanations**, whereas Condition C eliminated **94 explanations**.

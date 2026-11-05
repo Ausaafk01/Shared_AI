@@ -133,22 +133,28 @@ class ClusterAwareStatisticalSummary:
             "metric_name": self.metric_name,
             "n_clusters": self.n_clusters,
             "cluster_size": self.cluster_size,
-            "cluster_mean_diff": round(self.cluster_mean_diff, 4),
-            "cluster_std_error": round(self.cluster_std_error, 4),
+            "cluster_mean_diff": round(self.cluster_mean_diff, 6),
+            "cluster_mean_diff_exact": self.cluster_mean_diff,
+            "cluster_std_error": round(self.cluster_std_error, 6),
+            "cluster_std_error_exact": self.cluster_std_error,
             "confidence_interval_95": (
-                round(self.confidence_interval_95[0], 4),
-                round(self.confidence_interval_95[1], 4),
+                round(self.confidence_interval_95[0], 6),
+                round(self.confidence_interval_95[1], 6),
             ),
             "confidence_interval_95_exact": (
                 self.confidence_interval_95[0],
                 self.confidence_interval_95[1],
             ),
             "t_statistic": round(self.t_statistic, 4),
+            "t_statistic_exact": self.t_statistic,
             "p_value": round(self.p_value, 8),
+            "p_value_numerically_evaluated": self.p_value,
+            "p_value_method": "composite_simpsons_rule_numerical_integration",
             "degrees_of_freedom": self.degrees_of_freedom,
             "is_statistically_significant": self.is_statistically_significant,
             "notes": self.notes,
-            "category_differences": [round(d, 4) for d in self.category_differences],
+            "category_differences": list(self.category_differences),
+            "category_differences_exact": list(self.category_differences),
         }
 
 
@@ -218,7 +224,7 @@ class BenchmarkStatistics:
 
     @staticmethod
     def _t_p_value(t_stat: float, df: int) -> float:
-        """Computes exact two-tailed Student's t p-value."""
+        """Computes numerically evaluated two-tailed Student's t p-values via composite Simpson's rule numerical integration."""
         t = abs(t_stat)
         if t == 0.0 or df <= 0:
             return 1.0
@@ -343,7 +349,7 @@ class BenchmarkStatistics:
             f"Exploratory and conditional on treating the {k_clusters} categories as independent clusters; "
             f"these results do not establish general performance across real-world agent tasks, "
             f"and statistical significance does not constitute proof of general superiority. "
-            f"Between-category SE={se_cluster:.4f}, t={t_stat:.4f}, p={p_val:.4e}. Difference is "
+            f"Between-category SE={se_cluster:.6f}, t={t_stat:.4f}, numerically evaluated two-tailed Student's t p-value={p_val:.4e}. Difference is "
             f"{'statistically significant (p < 0.05)' if is_sig else 'not statistically significant'}."
         )
 

@@ -517,6 +517,82 @@ class TestBenchmarkSubsystem(unittest.TestCase):
         self.assertAlmostEqual(cluster_dec.confidence_interval_95[0], 0.510467, places=5)
         self.assertAlmostEqual(cluster_dec.confidence_interval_95[1], 1.156199, places=5)
 
+    def test_category_vectors_displayed_precision_and_json_reproducibility(self) -> None:
+        """Verify full precision in JSON, 4-6 decimal places in reports, and vector reproducibility across all 5 metrics."""
+        scenarios = self.dataset.list_scenarios()
+        comparisons = [self.runner.run_scenario(s) for s in scenarios]
+        stats = BenchmarkStatistics.compute_all_comparisons(comparisons)
+        exact_t_crit = BenchmarkStatistics._t_critical(9, 0.05)
+
+        cluster_metric_keys = [
+            "cluster_tokens",
+            "cluster_task_success",
+            "cluster_partial_success",
+            "cluster_repeated_explanations",
+            "cluster_decisions_maintained",
+        ]
+
+        # 1. JSON full precision validation
+        for k in cluster_metric_keys:
+            cs = stats[k]
+            d_dict = cs.to_dict()
+            self.assertIn("category_differences", d_dict)
+            self.assertIn("category_differences_exact", d_dict)
+            self.assertEqual(len(d_dict["category_differences"]), 10)
+            # Verify values are unrounded full-precision floats
+            for orig, stored in zip(cs.category_differences, d_dict["category_differences"]):
+                self.assertIsInstance(stored, float)
+                self.assertEqual(orig, stored)
+            # Verify numerical p-value metadata
+            self.assertIn("p_value_numerically_evaluated", d_dict)
+            self.assertEqual(d_dict["p_value_method"], "composite_simpsons_rule_numerical_integration")
+
+        # 2. Mathematical reproducibility from 6-decimal rounded vectors
+        for k in cluster_metric_keys:
+            cs = stats[k]
+            vec_6dec = [round(d, 6) for d in cs.category_differences]
+            recalc_mean = sum(vec_6dec) / 10.0
+            recalc_var = sum((d - recalc_mean) ** 2 for d in vec_6dec) / 9.0
+            recalc_se = math.sqrt(recalc_var / 10.0)
+            recalc_t = (recalc_mean / recalc_se) if recalc_se > 0 else 0.0
+            recalc_ci = (recalc_mean - exact_t_crit * recalc_se, recalc_mean + exact_t_crit * recalc_se)
+
+            # Assert reproduction within 1e-5 rounding tolerance
+            self.assertAlmostEqual(recalc_mean, cs.cluster_mean_diff, places=5)
+            self.assertAlmostEqual(recalc_se, cs.cluster_std_error, places=5)
+            self.assertAlmostEqual(recalc_t, cs.t_statistic, places=4)
+            self.assertAlmostEqual(recalc_ci[0], cs.confidence_interval_95[0], places=5)
+            self.assertAlmostEqual(recalc_ci[1], cs.confidence_interval_95[1], places=5)
+
+        # 3. Markdown report formatting and p-value phrasing validation
+        aggregate = BenchmarkEvaluator.evaluate(comparisons)
+        md_report = BenchmarkReporter.generate_markdown_report(aggregate, comparisons, stats)
+
+        # Check p-value description
+        self.assertIn("numerically evaluated two-tailed Student's t p-values", md_report)
+        self.assertIn("Exact Critical t = 2.262157162798205", md_report)
+
+        # Check repeating fractions formatted to 6 decimal places
+        self.assertIn("+276.333333", md_report)
+        self.assertIn("+0.666667", md_report)
+        self.assertIn("+0.883333", md_report)
+        self.assertIn("-3.333333", md_report)
+        self.assertIn("+1.333333", md_report)
+
+        # Check terminating values formatted to at least 4 decimal places
+        self.assertIn("+361.0000", md_report)
+        self.assertIn("+1.0000", md_report)
+        self.assertIn("+0.2000", md_report)
+        self.assertIn("-4.0000", md_report)
+
+        # Check that Displayed Ten-Cluster Paired Difference Vectors subsection exists
+        self.assertIn("### Displayed Ten-Cluster Paired Difference Vectors", md_report)
+        self.assertIn("Token Overhead ($C - A$)", md_report)
+        self.assertIn("Task Continuation Success ($C - A$)", md_report)
+        self.assertIn("Partial Credit Score ($C - A$)", md_report)
+        self.assertIn("Repeated Explanations Needed ($C - A$)", md_report)
+        self.assertIn("Decisions Maintained ($C - A$)", md_report)
+
     def test_zero_denominator_conflict_precision_convention(self) -> None:
         """Verify that zero predicted positive conflicts yields precision 0.0 by documented convention."""
         # Create dummy comparison with no positive predictions

@@ -538,6 +538,9 @@ class TestBenchmarkSubsystem(unittest.TestCase):
             d_dict = cs.to_dict()
             self.assertIn("category_differences", d_dict)
             self.assertIn("category_differences_exact", d_dict)
+            self.assertIn("confidence_interval_95_full_precision", d_dict)
+            self.assertIn("full_precision_95_confidence_interval", d_dict)
+            self.assertIn("numerically_evaluated_two_tailed_student_t_p_value", d_dict)
             self.assertEqual(len(d_dict["category_differences"]), 10)
             # Verify values are unrounded full-precision floats
             for orig, stored in zip(cs.category_differences, d_dict["category_differences"]):
@@ -568,8 +571,10 @@ class TestBenchmarkSubsystem(unittest.TestCase):
         aggregate = BenchmarkEvaluator.evaluate(comparisons)
         md_report = BenchmarkReporter.generate_markdown_report(aggregate, comparisons, stats)
 
-        # Check p-value description
+        # Check p-value and confidence interval terminology
         self.assertIn("numerically evaluated two-tailed Student's t p-values", md_report)
+        self.assertIn("Numerically Evaluated Two-Tailed Student's t p-Value", md_report)
+        self.assertIn("Full-Precision 95% Confidence Interval", md_report)
         self.assertIn("Exact Critical t = 2.262157162798205", md_report)
 
         # Check repeating fractions formatted to 6 decimal places

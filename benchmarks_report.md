@@ -1,6 +1,6 @@
 # AI Brain — Phase 4 System Benchmarking & Comparative Evaluation Report
 
-**Generated**: 2026-11-05 08:57:49 UTC
+**Generated**: 2026-11-05 09:07:43 UTC
 
 **Total Scenarios Evaluated**: 30 realistic multi-session test scenarios (3 per category across 10 categories)
 
@@ -94,7 +94,7 @@ While the suite contains 30 scenarios, they are organized into **10 distinct sce
 > **Directionality & Token Overhead Interpretation**: Subtraction direction is explicitly defined as **Condition C minus Condition A ($C - A$)**. For tokens consumed, the positive difference (+371.833333 tokens) means AI Brain consumes more tokens than Cold Start. This reflects **additional token overhead** from context injection, **not a performance improvement**.
 
 
-| Clustered Metric | Mean Diff (C - A) | Cluster Std Error | Exact 95% Confidence Interval | t-Statistic | Numerically Evaluated p-Value | Significant (p<0.05) | Interpretation |
+| Clustered Metric | Mean Diff (C - A) | Cluster Std Error | Full-Precision 95% Confidence Interval | t-Statistic | Numerically Evaluated Two-Tailed Student's t p-Value | Significant (p<0.05) | Interpretation |
 |---|---:|---:|:---:|---:|---:|:---:|---|
 | **Task Continuation Success (Cluster-Stratified, df=9)** | +0.7000 | +0.104822 | [0.4629, 0.9371] | 6.6780 | 9.0787e-05 | Yes | Higher is better (Task Pass Rate) |
 | **Partial Credit Score (Cluster-Stratified, df=9)** | +0.816667 | +0.089899 | [0.6133, 1.0200] | 9.0843 | 7.9106e-06 | Yes | Higher is better (Partial Credit) |
@@ -106,7 +106,7 @@ While the suite contains 30 scenarios, they are organized into **10 distinct sce
 
 > [!NOTE]
 > **Precision Note on Displayed Category Vectors & Confidence Intervals**:
-> The category-level paired differences ($D_k = C_k - A_k$) are evaluated using unrounded, full-precision floating point arithmetic (e.g., $TASK\_CONTINUATION = 341.0 - 64.666667 = +276.333333...$). All reported summary statistics—Mean Difference ($\bar{D} = +371.833333$), Sample SD ($s = 319.926660$), Standard Error ($SE = 101.169693$), and Exact 95% Confidence Interval ($[142.9715875613, 600.6950791054]$, presented rounded to two decimals as $[142.97, 600.70]$ using exact $t_{\text{crit}} = 2.262157162798205$ at $df=9$)—are computed directly from these unrounded full-precision values rather than from rounded display strings. The table below exposes all values with at least four decimal places (and six decimal places where repeating fractions occur) to guarantee exact mathematical reproducibility:
+> The category-level paired differences ($D_k = C_k - A_k$) are evaluated using unrounded, full-precision floating point arithmetic (e.g., $TASK\_CONTINUATION = 341.0 - 64.666667 = +276.333333...$). All reported summary statistics—Mean Difference ($\bar{D} = +371.833333$), Sample SD ($s = 319.926660$), Standard Error ($SE = 101.169693$), and Full-Precision 95% Confidence Interval ($[142.9715875613, 600.6950791054]$, presented rounded to two decimals as $[142.97, 600.70]$ using exact $t_{\text{crit}} = 2.262157162798205$ at $df=9$)—are computed directly from these unrounded full-precision values rather than from rounded display strings. The table below exposes all values with at least four decimal places (and six decimal places where repeating fractions occur) to guarantee exact mathematical reproducibility:
 
 | Category ($k$) | Task Success Diff | Partial Credit Diff | Token Overhead ($C - A$) | Explanations Diff ($C - A$) | Decisions Diff ($C - A$) |
 |---|---:|---:|---:|---:|---:|
@@ -124,7 +124,7 @@ While the suite contains 30 scenarios, they are organized into **10 distinct sce
 
 ### Displayed Ten-Cluster Paired Difference Vectors
 
-Every category-level difference vector ($D_k = C_k - A_k, k=1 \dots 10$) is displayed below with at least four decimal places, preferring six decimal places for repeating fractions. Re-evaluating means, standard deviations, standard errors, t-statistics, and exact confidence intervals from these displayed vectors reproduces the reported summary statistics within $< 10^{-6}$ rounding tolerance:
+Every category-level difference vector ($D_k = C_k - A_k, k=1 \dots 10$) is displayed below with at least four decimal places, preferring six decimal places for repeating fractions. Re-evaluating means, standard deviations, standard errors, t-statistics, and full-precision confidence intervals from these displayed vectors reproduces the reported summary statistics within $< 10^{-6}$ rounding tolerance:
 
 
 - **Token Overhead ($C - A$)** (+371.833333 token overhead):
@@ -139,7 +139,7 @@ Every category-level difference vector ($D_k = C_k - A_k, k=1 \dots 10$) is disp
 
   - Numerically Evaluated Two-Tailed Student's t $p$-Value: `0.005112`
 
-  - Exact 95% Confidence Interval: `[142.971588, 600.695079]` (displayed as `[142.9716, 600.6951]`)
+  - Full-Precision 95% Confidence Interval: `[142.971588, 600.695079]` (displayed as `[142.9716, 600.6951]`)
 
 
 - **Task Continuation Success ($C - A$)** (+0.700000 pass rate improvement):
@@ -154,7 +154,7 @@ Every category-level difference vector ($D_k = C_k - A_k, k=1 \dots 10$) is disp
 
   - Numerically Evaluated Two-Tailed Student's t $p$-Value: `9.0787e-05`
 
-  - Exact 95% Confidence Interval: `[0.462876, 0.937124]` (displayed as `[0.4629, 0.9371]`)
+  - Full-Precision 95% Confidence Interval: `[0.462876, 0.937124]` (displayed as `[0.4629, 0.9371]`)
 
 
 - **Partial Credit Score ($C - A$)** (+0.816667 partial credit improvement):
@@ -169,7 +169,7 @@ Every category-level difference vector ($D_k = C_k - A_k, k=1 \dots 10$) is disp
 
   - Numerically Evaluated Two-Tailed Student's t $p$-Value: `7.9106e-06`
 
-  - Exact 95% Confidence Interval: `[0.613302, 1.020032]` (displayed as `[0.6133, 1.0200]`)
+  - Full-Precision 95% Confidence Interval: `[0.613302, 1.020032]` (displayed as `[0.6133, 1.0200]`)
 
 
 - **Repeated Explanations Needed ($C - A$)** (-3.133333 explanations reduced):
@@ -184,7 +184,7 @@ Every category-level difference vector ($D_k = C_k - A_k, k=1 \dots 10$) is disp
 
   - Numerically Evaluated Two-Tailed Student's t $p$-Value: `1.0312e-04`
 
-  - Exact 95% Confidence Interval: `[-4.212679, -2.053987]` (displayed as `[-4.2127, -2.0540]`)
+  - Full-Precision 95% Confidence Interval: `[-4.212679, -2.053987]` (displayed as `[-4.2127, -2.0540]`)
 
 
 - **Decisions Maintained ($C - A$)** (+0.833333 decisions preserved):
@@ -199,7 +199,7 @@ Every category-level difference vector ($D_k = C_k - A_k, k=1 \dots 10$) is disp
 
   - Numerically Evaluated Two-Tailed Student's t $p$-Value: `2.4720e-04`
 
-  - Exact 95% Confidence Interval: `[0.510467, 1.156199]` (displayed as `[0.5105, 1.1562]`)
+  - Full-Precision 95% Confidence Interval: `[0.510467, 1.156199]` (displayed as `[0.5105, 1.1562]`)
 
 
 
@@ -266,7 +266,7 @@ All four retrieval strategies were evaluated on the identical query set across a
 
 | **Vector (Cosine)** | 0.641 | 0.767 | 0.676 | 0.560 | 0.800 | 0.659 | 0.717 | 0.729 | 0.259 |
 | **Knowledge Graph (Traversal)** | 0.589 | 0.633 | 0.604 | 0.767 | 0.657 | 0.708 | 0.633 | 0.631 | 0.178 |
-| **Hybrid (RRF Fusion)** | 0.661 | 0.767 | 0.698 | 0.519 | 0.800 | 0.629 | 0.717 | 0.732 | 0.306 |
+| **Hybrid (RRF Fusion)** | 0.661 | 0.767 | 0.698 | 0.519 | 0.800 | 0.629 | 0.700 | 0.720 | 0.306 |
 | **ML-Enhanced (Reranked)** | 0.668 | 0.800 | 0.709 | 0.537 | 0.829 | 0.652 | 0.733 | 0.750 | 0.299 |
 
 > [!NOTE]
@@ -340,7 +340,7 @@ Every scenario was audited and explicitly labeled according to ground truth:
 ### 1. Does AI Brain reduce total context consumption?
 - **Direct Answer**: **No for single isolated queries, but yes compared to unbounded raw event replay in long sessions.**
 - For a single query, Condition C consumes **437.8 estimated tokens** compared to **65.9 estimated tokens** for Cold Start (+564.0% context overhead).
-- **Token Cost Direction & Overhead**: The category-level token difference is **+371.833333 tokens** ($C - A$). Subtraction direction is defined as Condition C minus Condition A. A positive difference indicates that AI Brain consumes more tokens than Cold Start. This constitutes **additional token overhead**, not a performance improvement. Summary statistics are derived from unrounded full-precision category differences (mean = +371.833333, SE = 101.169693, exact 95% CI = [142.9715875613, 600.6950791054], presented as [142.9716, 600.6951] / [142.97, 600.70] with exact critical t = 2.262157162798205 at df = 9, numerically evaluated two-tailed Student's t p-value = 0.00511227).
+- **Token Cost Direction & Overhead**: The category-level token difference is **+371.833333 tokens** ($C - A$). Subtraction direction is defined as Condition C minus Condition A. A positive difference indicates that AI Brain consumes more tokens than Cold Start. This constitutes **additional token overhead**, not a performance improvement. Summary statistics are derived from unrounded full-precision category differences (mean = +371.833333, SE = 101.169693, full-precision 95% CI = [142.9715875613, 600.6950791054], presented as [142.9716, 600.6951] / [142.97, 600.70] with exact critical t = 2.262157162798205 at df = 9, numerically evaluated two-tailed Student's t p-value = 0.00511227).
 - However, compared to Raw History (274.1 estimated tokens in early multi-turn sessions), Brain's budgeted context package bounds token growth, preventing transcript overflow as history expands.
 
 ### 2. Does it improve retrieval quality?

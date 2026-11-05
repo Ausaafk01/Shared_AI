@@ -217,7 +217,7 @@ class BenchmarkReporter:
             "For tokens consumed, the positive difference (+371.833333 tokens) means AI Brain consumes more tokens than Cold Start. "
             "This reflects **additional token overhead** from context injection, **not a performance improvement**.\n\n"
         )
-        md.append("| Clustered Metric | Mean Diff (C - A) | Cluster Std Error | Exact 95% Confidence Interval | t-Statistic | Numerically Evaluated p-Value | Significant (p<0.05) | Interpretation |")
+        md.append("| Clustered Metric | Mean Diff (C - A) | Cluster Std Error | Full-Precision 95% Confidence Interval | t-Statistic | Numerically Evaluated Two-Tailed Student's t p-Value | Significant (p<0.05) | Interpretation |")
         md.append("|---|---:|---:|:---:|---:|---:|:---:|---|")
 
         cluster_keys = (
@@ -243,7 +243,7 @@ class BenchmarkReporter:
             "> The category-level paired differences ($D_k = C_k - A_k$) are evaluated using unrounded, full-precision floating point arithmetic "
             "(e.g., $TASK\\_CONTINUATION = 341.0 - 64.666667 = +276.333333...$). "
             "All reported summary statistics—Mean Difference ($\\bar{D} = +371.833333$), Sample SD ($s = 319.926660$), Standard Error ($SE = 101.169693$), "
-            "and Exact 95% Confidence Interval ($[142.9715875613, 600.6950791054]$, presented rounded to two decimals as $[142.97, 600.70]$ using exact $t_{\\text{crit}} = 2.262157162798205$ at $df=9$)—are "
+            "and Full-Precision 95% Confidence Interval ($[142.9715875613, 600.6950791054]$, presented rounded to two decimals as $[142.97, 600.70]$ using exact $t_{\\text{crit}} = 2.262157162798205$ at $df=9$)—are "
             "computed directly from these unrounded full-precision values rather than from rounded display strings. "
             "The table below exposes all values with at least four decimal places (and six decimal places where repeating fractions occur) to guarantee exact mathematical reproducibility:\n\n"
             "| Category ($k$) | Task Success Diff | Partial Credit Diff | Token Overhead ($C - A$) | Explanations Diff ($C - A$) | Decisions Diff ($C - A$) |\n"
@@ -268,7 +268,7 @@ class BenchmarkReporter:
         md.append(
             "Every category-level difference vector ($D_k = C_k - A_k, k=1 \\dots 10$) is displayed below with at least four decimal places, "
             "preferring six decimal places for repeating fractions. Re-evaluating means, standard deviations, standard errors, "
-            "t-statistics, and exact confidence intervals from these displayed vectors reproduces the reported summary statistics within $< 10^{-6}$ rounding tolerance:\n\n"
+            "t-statistics, and full-precision confidence intervals from these displayed vectors reproduces the reported summary statistics within $< 10^{-6}$ rounding tolerance:\n\n"
         )
 
         vector_items = (
@@ -288,7 +288,7 @@ class BenchmarkReporter:
                 md.append(f"  - Cluster SE ($SE$): `{_format_diff(c_sum.cluster_std_error)}`\n")
                 md.append(f"  - $t$-Statistic: `{c_sum.t_statistic:.4f}`\n")
                 md.append(f"  - Numerically Evaluated Two-Tailed Student's t $p$-Value: `{p_disp}`\n")
-                md.append(f"  - Exact 95% Confidence Interval: `[{c_sum.confidence_interval_95[0]:.6f}, {c_sum.confidence_interval_95[1]:.6f}]` (displayed as `[{c_sum.confidence_interval_95[0]:.4f}, {c_sum.confidence_interval_95[1]:.4f}]`)\n\n")
+                md.append(f"  - Full-Precision 95% Confidence Interval: `[{c_sum.confidence_interval_95[0]:.6f}, {c_sum.confidence_interval_95[1]:.6f}]` (displayed as `[{c_sum.confidence_interval_95[0]:.4f}, {c_sum.confidence_interval_95[1]:.4f}]`)\n\n")
 
         md.append("\n### Category-Level Detailed Breakdown (10 Clusters)\n")
         md.append("| Category | N | Cold Start Pass | Raw History Pass | AI Brain Pass | Cold Partial | Raw Partial | Brain Partial | Tokens (A / B / C) |")
@@ -424,7 +424,7 @@ class BenchmarkReporter:
             "- **Token Cost Direction & Overhead**: The category-level token difference is **+371.833333 tokens** ($C - A$). "
             "Subtraction direction is defined as Condition C minus Condition A. A positive difference indicates that AI Brain consumes more tokens than Cold Start. "
             "This constitutes **additional token overhead**, not a performance improvement. "
-            "Summary statistics are derived from unrounded full-precision category differences (mean = +371.833333, SE = 101.169693, exact 95% CI = [142.9715875613, 600.6950791054], presented as [142.9716, 600.6951] / [142.97, 600.70] with exact critical t = 2.262157162798205 at df = 9, numerically evaluated two-tailed Student's t p-value = 0.00511227).\n"
+            "Summary statistics are derived from unrounded full-precision category differences (mean = +371.833333, SE = 101.169693, full-precision 95% CI = [142.9715875613, 600.6950791054], presented as [142.9716, 600.6951] / [142.97, 600.70] with exact critical t = 2.262157162798205 at df = 9, numerically evaluated two-tailed Student's t p-value = 0.00511227).\n"
             f"- However, compared to Raw History ({aggregate.token_metrics.avg_total_tokens_raw_history:.1f} estimated tokens in early multi-turn sessions), "
             "Brain's budgeted context package bounds token growth, preventing transcript overflow as history expands.\n"
         )

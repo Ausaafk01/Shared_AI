@@ -39,10 +39,12 @@ class SQLiteFeedbackStore(FeedbackStore):
 
     def __init__(self, db_path: str = ":memory:") -> None:
         self.db_path = db_path
-        self._closed = False
+        self._conn: Optional[sqlite3.Connection] = None
+        self._closed = True
         self._conn = sqlite3.connect(db_path)
         self._conn.row_factory = sqlite3.Row
         self._init_db()
+        self._closed = False
 
     def _init_db(self) -> None:
         with self._conn:
@@ -147,12 +149,16 @@ class SQLiteFeedbackStore(FeedbackStore):
         return results
 
     def close(self) -> None:
-        if not getattr(self, "_closed", False):
+        """Close SQLite database connection (idempotent)."""
+        if getattr(self, "_closed", False):
+            return
+        conn = getattr(self, "_conn", None)
+        if conn is not None:
             try:
-                self._conn.close()
+                conn.close()
             except Exception:
                 pass
-            self._closed = True
+        self._closed = True
 
     def __enter__(self) -> "SQLiteFeedbackStore":
         return self

@@ -809,6 +809,41 @@ class TestBrainLoop(unittest.TestCase):
         finally:
             ev_store.close()
 
+    # 27. BrainLoop close idempotency, exception safety, and partial initialization
+    def test_27_brain_loop_close_idempotency_and_exception_safety(self) -> None:
+        """Verify BrainLoop close() is idempotent, exception-safe in with blocks, and safe if partially initialized."""
+        ev_store = SQLiteEventStore(":memory:")
+        try:
+            # 1. Idempotency
+            loop = BrainLoop(event_store=ev_store)
+            self.assertFalse(loop._closed)
+            self.assertFalse(loop.interaction_store._closed)
+            loop.close()
+            self.assertTrue(loop._closed)
+            self.assertTrue(loop.interaction_store._closed)
+            loop.close()
+            loop.close()
+            self.assertTrue(loop._closed)
+
+            # 2. Context manager exception safety
+            captured_loop = None
+            with self.assertRaises(RuntimeError):
+                with BrainLoop(event_store=ev_store) as lp:
+                    captured_loop = lp
+                    self.assertFalse(lp._closed)
+                    raise RuntimeError("Simulated failure inside loop context")
+            self.assertIsNotNone(captured_loop)
+            self.assertTrue(captured_loop._closed)
+            self.assertTrue(captured_loop.interaction_store._closed)
+
+            # 3. Partial initialization safety
+            raw_loop = BrainLoop.__new__(BrainLoop)
+            raw_loop.close()
+            raw_loop.__del__()
+            self.assertTrue(getattr(raw_loop, "_closed", False))
+        finally:
+            ev_store.close()
+
 
 class TestBrainLoopReviewAndRecovery(unittest.TestCase):
     """

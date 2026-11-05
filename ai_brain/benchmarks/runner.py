@@ -493,390 +493,400 @@ class BenchmarkRunner:
         ev_store = SQLiteEventStore(":memory:")
         vec_provider = MockEmbeddingProvider()
         vec_store = SQLiteVectorStore(":memory:")
-
-        vec_index = VectorIndex(storage=vec_store, provider=vec_provider)
-        vec_mgr = VectorMemoryManager(storage=vec_store, provider=vec_provider)
-        graph = KnowledgeGraph()
-        graph_integrator = GraphIntegrator(graph)
-
-        # Base retrieval engine for Vector, Graph, and Hybrid
-        retrieval_engine = RetrievalEngine(
-            vector_index=vec_index,
-            graph=graph,
-            allow_partial_results=True,
-        )
-
-        # ML-Enhanced ranker setup with trained weights from Phase 3
-        ml_ranker = RelevanceRankingModel(
-            metadata=ModelMetadata(
-                model_name="relevance_reranker",
-                model_type=ModelType.RANKING,
-                version="v1.0",
-                created_at=datetime(2026, 11, 1, tzinfo=timezone.utc),
-                feature_names=RelevanceRankingModel.FEATURE_NAMES,
-                parameters={"trained_samples": 48},
-            ),
-            weights={
-                "base_retrieval_score": 1.1,
-                "vector_score": 0.9,
-                "graph_score": 0.8,
-                "importance": 0.4,
-                "confidence": 0.5,
-                "recency_factor": 0.2,
-                "query_term_overlap": 0.8,
-                "is_exact_agent_match": 0.3,
-                "status_penalty": -1.5,
-            },
-            bias=0.05,
-        )
-        ml_ranker._is_trained = True
-
-        ml_retrieval_engine = RetrievalEngine(
-            vector_index=vec_index,
-            graph=graph,
-            ml_ranker=ml_ranker,
-            allow_partial_results=True,
-        )
-
-        prov_flag = self.include_provenance_section if include_provenance_section is None else include_provenance_section
-        ctx_builder = ContextBuilder(default_max_tokens=self.token_budget, include_provenance_section=prov_flag)
-
-        # Brain Loop orchestration with real subsystem components
-        loop = BrainLoop(
-            event_store=ev_store,
-            retrieval_engine=retrieval_engine,
-            context_builder=ctx_builder,
-            graph=graph,
-            graph_integrator=graph_integrator,
-            vector_manager=vec_mgr,
-        )
-
-        # 1. Seed historical events into Brain
-        all_seed_events = sorted(
-            list(scenario.historical_events) + list(scenario.distractor_events),
-            key=lambda ev: ev.timestamp,
-        )
-        for ev in all_seed_events:
-            ev_store.store(ev)
-
-        history_tokens = sum(
-            self.tokenizer.count_tokens(ev.output.get("text", "") or "")
-            for ev in all_seed_events
-        )
-
-        # 2. Extract memories from seed events
-        extractor = MemoryExtractor()
-        extracted_memories = extractor.extract_many(all_seed_events)
-
-        # 3. Synchronize extracted memories into Brain
-        now = datetime.now(timezone.utc)
-        loop.register_memories(extracted_memories)
-        graph_integrator.integrate_memories(extracted_memories)
-        vec_mgr.index_memories(extracted_memories)
-
-        # Handle explicit supersession in scenarios like UPDATED_REQUIREMENTS or STALE_KNOWLEDGE_REJECTION
-        cat_val = scenario.category.value
-        if scenario.conflict_ground_truth == ConflictGroundTruth.TEMPORAL_UPDATE or cat_val in ("UPDATED_REQUIREMENTS", "STALE_KNOWLEDGE_REJECTION"):
-            mems = list(loop.memory_handler.get_active_memories(scenario.project_id))
-            stale_keywords = ("rest", "md5", "python 3.9", "v1.2", "batch size: 100", "synchronous", "asset-storage.s3")
-            for m in mems:
-                if any(kw in m.content.lower() for kw in stale_keywords):
-                    superseded_m = Memory(
-                        memory_id=m.memory_id,
-                        memory_type=m.memory_type,
-                        content=m.content,
-                        project_id=m.project_id,
-                        created_at=m.created_at,
-                        updated_at=max(now, m.created_at + timedelta(seconds=1)),
-                        status=MemoryStatus.SUPERSEDED,
-                        root_memory_id=m.root_memory_id or m.memory_id,
-                        version=m.version,
-                    )
-                    loop.register_memories([superseded_m])
-                    vec_mgr.archive_memory(m.memory_id, scenario.project_id)
-
-        # Handle explicit dispute ONLY on genuine contradictions (Scenario 05A, 05B)
-        # Compatible claims (Scenario 05C) are NEVER marked disputed!
-        if scenario.conflict_ground_truth == ConflictGroundTruth.GENUINE_CONTRADICTION and scenario.expected_conflicts:
-            mems = list(loop.memory_handler.get_active_memories(scenario.project_id))
-            for m in mems:
-                c_low = m.content.lower()
-                is_conflicting = any(
-                    cf.lower() in c_low or any(w.lower() in c_low for w in cf.split() if len(w) > 3)
-                    for cf in scenario.expected_conflicts
-                )
-                if is_conflicting:
-                    disputed_m = Memory(
-                        memory_id=m.memory_id,
-                        memory_type=m.memory_type,
-                        content=m.content,
-                        project_id=m.project_id,
-                        created_at=m.created_at,
-                        updated_at=max(now, m.created_at + timedelta(seconds=1)),
-                        status=MemoryStatus.DISPUTED,
-                        root_memory_id=m.root_memory_id or m.memory_id,
-                        version=m.version,
-                    )
-                    loop.register_memories([disputed_m])
-                    vec_mgr.index_memory(disputed_m)
-
-        # 4. Execute all 4 genuine retrieval strategies at K=5 on the exact same query
-        strategy_metrics_map: Dict[str, Dict[str, float]] = {}
-        total_relevant_in_db = sum(
-            1 for m in extracted_memories
-            if any(f.lower() in m.content.lower() for f in scenario.expected_facts) or
-               any(d.lower() in m.content.lower() for d in scenario.expected_decisions) or
-               any(c.lower() in m.content.lower() for c in scenario.expected_constraints) or
-               any(cf.lower() in m.content.lower() for cf in scenario.expected_conflicts)
-        )
-        target_ground_truth_count = max(1, total_relevant_in_db)
-
-        for strat_name, method_name, engine_inst in (
-            ("Vector (Cosine)", "vector", retrieval_engine),
-            ("Knowledge Graph (Traversal)", "graph", retrieval_engine),
-            ("Hybrid (RRF Fusion)", "hybrid", retrieval_engine),
-            ("ML-Enhanced (Reranked)", "hybrid", ml_retrieval_engine),
-        ):
-            try:
-                resp = engine_inst.retrieve(
-                    scenario.task_prompt,
-                    project_id=scenario.project_id,
-                    method=method_name,
-                    top_k=5,
-                )
-                items_k = resp.results[:5]
-                mids_k = [it.memory_id for it in items_k]
-            except Exception:
-                items_k = []
-                mids_k = []
-
-            rel_ids = []
-            irr_ids = []
-            for it in items_k:
-                c_low = it.content.lower()
-                is_rel = (
-                    any(f.lower() in c_low for f in scenario.expected_facts) or
-                    any(d.lower() in c_low for d in scenario.expected_decisions) or
-                    any(c.lower() in c_low for c in scenario.expected_constraints) or
-                    any(cf.lower() in c_low for cf in scenario.expected_conflicts)
-                )
-                if is_rel:
-                    rel_ids.append(it.memory_id)
-                else:
-                    irr_ids.append(it.memory_id)
-
-            n_ret = len(mids_k)
-            n_rel = len(rel_ids)
-            p_val = (n_rel / n_ret) if n_ret > 0 else 0.0
-            r_val = (n_rel / target_ground_truth_count)
-            f1_val = (2 * p_val * r_val) / (p_val + r_val) if (p_val + r_val) > 0 else 0.0
-            irr_val = (len(irr_ids) / n_ret) if n_ret > 0 else 0.0
-
-            mrr_val = 0.0
-            for r_idx, mid in enumerate(mids_k, 1):
-                if mid in rel_ids:
-                    mrr_val = 1.0 / r_idx
-                    break
-
-            dcg = 0.0
-            for r_idx, mid in enumerate(mids_k, 1):
-                if mid in rel_ids:
-                    dcg += 1.0 / math.log2(r_idx + 1)
-            idcg = sum(1.0 / math.log2(i + 1) for i in range(1, min(5, target_ground_truth_count) + 1))
-            ndcg_val = (dcg / idcg) if idcg > 0 else 1.0
-
-            strategy_metrics_map[strat_name] = {
-                "precision_at_k": p_val,
-                "recall_at_k": r_val,
-                "f1_score": f1_val,
-                "mrr": mrr_val,
-                "ndcg_at_k": ndcg_val,
-                "irrelevant_rate": irr_val,
-                "retrieved_count": n_ret,
-                "relevant_count": n_rel,
-                "total_ground_truth": target_ground_truth_count,
-            }
-
-        # 5. Prepare Context for the task prompt using standard Hybrid engine
-        inp = AgentInteractionInput(
-            project_id=scenario.project_id,
-            agent_id="agent-brain-enabled",
-            session_id="sess-bench-eval",
-            content=scenario.task_prompt,
-        )
-        ctx_result = loop.prepare_context(inp)
-        context_pkg = ctx_result.context_package
-        context_md = context_pkg.to_markdown() if context_pkg else ""
-
-        # Measure tokens
-        prompt_tokens = self.tokenizer.count_tokens(scenario.task_prompt)
-        ctx_tokens = self.tokenizer.count_tokens(context_md)
-        agent_input_tokens = prompt_tokens + ctx_tokens
-
-        # Raw memory tokens before Context Builder compression/knapsack packing
-        retrieved_items = ctx_result.retrieval_response.results if ctx_result.retrieval_response else ()
-        raw_memory_tokens = sum(self.tokenizer.count_tokens(item.content) for item in retrieved_items)
-
-        # Simulated Brain-aware agent incorporates context package directly
-        context_lower = context_md.lower()
-        agent_output_parts = [f"Executing task: {scenario.task_prompt}"]
-
-        # Check if genuine dispute warnings exist
-        has_dispute_warning = (
-            ("disputed" in context_lower or "warning" in context_lower or bool(context_pkg and context_pkg.has_disputes)) and
-            scenario.conflict_ground_truth == ConflictGroundTruth.GENUINE_CONTRADICTION
-        )
-        if has_dispute_warning and scenario.expected_conflicts:
-            agent_output_parts.append(
-                f"DISPUTE DETECTED: Historical records contain contradictory claims regarding "
-                f"{' vs '.join(scenario.expected_conflicts)}. Preserved dispute warning; flagging for team resolution."
-            )
-
-        # Incorporate recalled facts & decisions
-        recalled_items = []
-        for fact in scenario.expected_facts:
-            if fact.lower() in context_lower:
-                recalled_items.append(f"Fact verified: {fact}")
-        for dec in scenario.expected_decisions:
-            if dec.lower() in context_lower or any(word in context_lower for word in dec.lower().split()[:3]):
-                recalled_items.append(f"Prior decision maintained: {dec}")
-        for const in scenario.expected_constraints:
-            if const.lower() in context_lower or any(word in context_lower for word in const.lower().split()[:2]):
-                recalled_items.append(f"Technical constraint applied: {const}")
-
-        if recalled_items:
-            agent_output_parts.append("Applied persistent Brain knowledge:\n- " + "\n- ".join(recalled_items))
-        else:
-            agent_output_parts.append("Proceeded with available context.")
-
-        agent_output = "\n\n".join(agent_output_parts)
-        output_tokens = self.tokenizer.count_tokens(agent_output)
-        total_tokens = agent_input_tokens + output_tokens
-
-        tokens = ScenarioTokenAudit(
-            task_prompt_tokens=prompt_tokens,
-            available_history_tokens=history_tokens,
-            supplied_history_tokens=ctx_tokens,
-            omitted_history_tokens=max(0, history_tokens - raw_memory_tokens),
-            retrieved_memory_tokens=raw_memory_tokens,
-            context_builder_tokens=ctx_tokens,
-            agent_input_tokens=agent_input_tokens,
-            agent_output_tokens=output_tokens,
-            total_tokens=total_tokens,
-            tokenizer_name="DeterministicTokenizer (~4 chars/token approximation)",
-        )
-
-        # Outcomes evaluation
-        combined_text = (context_md + " " + agent_output).lower()
-        facts_recovered = sum(1 for f in scenario.expected_facts if f.lower() in combined_text)
-        facts_missed = len(scenario.expected_facts) - facts_recovered
-        facts_recovery_rate = (facts_recovered / len(scenario.expected_facts)) if scenario.expected_facts else 1.0
-
-        decisions_maintained = sum(
-            1 for d in scenario.expected_decisions
-            if d.lower() in combined_text or all(w in combined_text for w in d.lower().split()[:2])
-        )
-        decisions_maintenance_rate = (decisions_maintained / len(scenario.expected_decisions)) if scenario.expected_decisions else 1.0
-
-        constraints_adhered = sum(
-            1 for c in scenario.expected_constraints
-            if c.lower() in combined_text or any(w in combined_text for w in c.lower().split()[:2])
-        )
-        constraints_violated = len(scenario.expected_constraints) - constraints_adhered
-        constraints_adherence_rate = (constraints_adhered / len(scenario.expected_constraints)) if scenario.expected_constraints else 1.0
-
-        missing_notes = []
-        for f in scenario.expected_facts:
-            if f.lower() not in combined_text:
-                missing_notes.append(f"Omitted fact: {f}")
-        for d in scenario.expected_decisions:
-            if d.lower() not in combined_text and not all(w in combined_text for w in d.lower().split()[:2]):
-                missing_notes.append(f"Superseded/missed decision: {d}")
-        for c in scenario.expected_constraints:
-            if c.lower() not in combined_text and not any(w in combined_text for w in c.lower().split()[:2]):
-                missing_notes.append(f"Constraint not explicitly verified: {c}")
-
-        repeated_explanations = facts_missed + constraints_violated
-
-        # Conflict handling: True positive for genuine contradictions; True negative for compatible claims
-        conflict_detected = bool(has_dispute_warning)
-        if scenario.conflict_ground_truth == ConflictGroundTruth.GENUINE_CONTRADICTION:
-            conflict_handled = conflict_detected
-        else:
-            conflict_handled = not conflict_detected
-
-        stale_used = sum(1 for item in retrieved_items if item.status == "SUPERSEDED")
-
-        base_partial = (
-            0.35 * facts_recovery_rate +
-            0.35 * decisions_maintenance_rate +
-            0.30 * constraints_adherence_rate
-        )
-        if not scenario.expected_facts and not scenario.expected_decisions and not scenario.expected_constraints:
-            partial_score = 1.0 if conflict_handled else 0.0
-        elif scenario.conflict_ground_truth == ConflictGroundTruth.GENUINE_CONTRADICTION:
-            partial_score = 0.6 * base_partial + 0.4 * (1.0 if conflict_handled else 0.0)
-        else:
-            partial_score = base_partial * (0.5 if stale_used > 0 else 1.0)
-
-        # Retrieval accuracy classification
-        retrieved_ids = tuple(item.memory_id for item in retrieved_items)
-        relevant_ids = []
-        irrelevant_ids = []
-        for item in retrieved_items:
-            c_low = item.content.lower()
-            is_rel = any(f.lower() in c_low for f in scenario.expected_facts) or \
-                     any(d.lower() in c_low for d in scenario.expected_decisions) or \
-                     any(c.lower() in c_low for c in scenario.expected_constraints) or \
-                     any(cf.lower() in c_low for cf in scenario.expected_conflicts)
-            if is_rel:
-                relevant_ids.append(item.memory_id)
-            else:
-                irrelevant_ids.append(item.memory_id)
-
-        task_success = (
-            facts_recovery_rate >= 0.75
-            and decisions_maintenance_rate >= 0.75
-            and constraints_violated == 0
-            and conflict_handled
-            and stale_used == 0
-        )
-
-        elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+        loop: Optional[BrainLoop] = None
 
         try:
-            loop.close()
-            ev_store.close()
-            vec_store.close()
-        except Exception:
-            pass
+            vec_index = VectorIndex(storage=vec_store, provider=vec_provider)
+            vec_mgr = VectorMemoryManager(storage=vec_store, provider=vec_provider)
+            graph = KnowledgeGraph()
+            graph_integrator = GraphIntegrator(graph)
 
-        return ConditionRunResult(
-            scenario_id=scenario.scenario_id,
-            condition=BenchmarkCondition.AI_BRAIN,
-            agent_id="agent-brain-enabled",
-            agent_output=agent_output,
-            tokens=tokens,
-            retrieved_memory_ids=retrieved_ids,
-            relevant_retrieved_ids=tuple(relevant_ids),
-            irrelevant_retrieved_ids=tuple(irrelevant_ids),
-            facts_recovery_rate=facts_recovery_rate,
-            decisions_maintenance_rate=decisions_maintenance_rate,
-            constraints_adherence_rate=constraints_adherence_rate,
-            partial_success_score=partial_score,
-            task_success=task_success,
-            facts_recovered_count=facts_recovered,
-            facts_missed_count=facts_missed,
-            decisions_maintained_count=decisions_maintained,
-            constraints_violated_count=constraints_violated,
-            repeated_explanations_needed=repeated_explanations,
-            conflict_detected=conflict_detected,
-            conflict_handled_correctly=conflict_handled,
-            stale_memories_used_count=stale_used,
-            execution_time_ms=elapsed_ms,
-            missing_details_notes=tuple(missing_notes),
-            retrieval_strategy_results=strategy_metrics_map,
-        )
+            # Base retrieval engine for Vector, Graph, and Hybrid
+            retrieval_engine = RetrievalEngine(
+                vector_index=vec_index,
+                graph=graph,
+                allow_partial_results=True,
+            )
+
+            # ML-Enhanced ranker setup with trained weights from Phase 3
+            ml_ranker = RelevanceRankingModel(
+                metadata=ModelMetadata(
+                    model_name="relevance_reranker",
+                    model_type=ModelType.RANKING,
+                    version="v1.0",
+                    created_at=datetime(2026, 11, 1, tzinfo=timezone.utc),
+                    feature_names=RelevanceRankingModel.FEATURE_NAMES,
+                    parameters={"trained_samples": 48},
+                ),
+                weights={
+                    "base_retrieval_score": 1.1,
+                    "vector_score": 0.9,
+                    "graph_score": 0.8,
+                    "importance": 0.4,
+                    "confidence": 0.5,
+                    "recency_factor": 0.2,
+                    "query_term_overlap": 0.8,
+                    "is_exact_agent_match": 0.3,
+                    "status_penalty": -1.5,
+                },
+                bias=0.05,
+            )
+            ml_ranker._is_trained = True
+
+            ml_retrieval_engine = RetrievalEngine(
+                vector_index=vec_index,
+                graph=graph,
+                ml_ranker=ml_ranker,
+                allow_partial_results=True,
+            )
+
+            prov_flag = self.include_provenance_section if include_provenance_section is None else include_provenance_section
+            ctx_builder = ContextBuilder(default_max_tokens=self.token_budget, include_provenance_section=prov_flag)
+
+            # Brain Loop orchestration with real subsystem components
+            loop = BrainLoop(
+                event_store=ev_store,
+                retrieval_engine=retrieval_engine,
+                context_builder=ctx_builder,
+                graph=graph,
+                graph_integrator=graph_integrator,
+                vector_manager=vec_mgr,
+            )
+
+            # 1. Seed historical events into Brain
+            all_seed_events = sorted(
+                list(scenario.historical_events) + list(scenario.distractor_events),
+                key=lambda ev: ev.timestamp,
+            )
+            for ev in all_seed_events:
+                ev_store.store(ev)
+    
+            history_tokens = sum(
+                self.tokenizer.count_tokens(ev.output.get("text", "") or "")
+                for ev in all_seed_events
+            )
+    
+            # 2. Extract memories from seed events
+            extractor = MemoryExtractor()
+            extracted_memories = extractor.extract_many(all_seed_events)
+    
+            # 3. Synchronize extracted memories into Brain
+            now = datetime.now(timezone.utc)
+            loop.register_memories(extracted_memories)
+            graph_integrator.integrate_memories(extracted_memories)
+            vec_mgr.index_memories(extracted_memories)
+    
+            # Handle explicit supersession in scenarios like UPDATED_REQUIREMENTS or STALE_KNOWLEDGE_REJECTION
+            cat_val = scenario.category.value
+            if scenario.conflict_ground_truth == ConflictGroundTruth.TEMPORAL_UPDATE or cat_val in ("UPDATED_REQUIREMENTS", "STALE_KNOWLEDGE_REJECTION"):
+                mems = list(loop.memory_handler.get_active_memories(scenario.project_id))
+                stale_keywords = ("rest", "md5", "python 3.9", "v1.2", "batch size: 100", "synchronous", "asset-storage.s3")
+                for m in mems:
+                    if any(kw in m.content.lower() for kw in stale_keywords):
+                        superseded_m = Memory(
+                            memory_id=m.memory_id,
+                            memory_type=m.memory_type,
+                            content=m.content,
+                            project_id=m.project_id,
+                            created_at=m.created_at,
+                            updated_at=max(now, m.created_at + timedelta(seconds=1)),
+                            status=MemoryStatus.SUPERSEDED,
+                            root_memory_id=m.root_memory_id or m.memory_id,
+                            version=m.version,
+                        )
+                        loop.register_memories([superseded_m])
+                        vec_mgr.archive_memory(m.memory_id, scenario.project_id)
+    
+            # Handle explicit dispute ONLY on genuine contradictions (Scenario 05A, 05B)
+            # Compatible claims (Scenario 05C) are NEVER marked disputed!
+            if scenario.conflict_ground_truth == ConflictGroundTruth.GENUINE_CONTRADICTION and scenario.expected_conflicts:
+                mems = list(loop.memory_handler.get_active_memories(scenario.project_id))
+                for m in mems:
+                    c_low = m.content.lower()
+                    is_conflicting = any(
+                        cf.lower() in c_low or any(w.lower() in c_low for w in cf.split() if len(w) > 3)
+                        for cf in scenario.expected_conflicts
+                    )
+                    if is_conflicting:
+                        disputed_m = Memory(
+                            memory_id=m.memory_id,
+                            memory_type=m.memory_type,
+                            content=m.content,
+                            project_id=m.project_id,
+                            created_at=m.created_at,
+                            updated_at=max(now, m.created_at + timedelta(seconds=1)),
+                            status=MemoryStatus.DISPUTED,
+                            root_memory_id=m.root_memory_id or m.memory_id,
+                            version=m.version,
+                        )
+                        loop.register_memories([disputed_m])
+                        vec_mgr.index_memory(disputed_m)
+    
+            # 4. Execute all 4 genuine retrieval strategies at K=5 on the exact same query
+            strategy_metrics_map: Dict[str, Dict[str, float]] = {}
+            total_relevant_in_db = sum(
+                1 for m in extracted_memories
+                if any(f.lower() in m.content.lower() for f in scenario.expected_facts) or
+                   any(d.lower() in m.content.lower() for d in scenario.expected_decisions) or
+                   any(c.lower() in m.content.lower() for c in scenario.expected_constraints) or
+                   any(cf.lower() in m.content.lower() for cf in scenario.expected_conflicts)
+            )
+            target_ground_truth_count = max(1, total_relevant_in_db)
+    
+            for strat_name, method_name, engine_inst in (
+                ("Vector (Cosine)", "vector", retrieval_engine),
+                ("Knowledge Graph (Traversal)", "graph", retrieval_engine),
+                ("Hybrid (RRF Fusion)", "hybrid", retrieval_engine),
+                ("ML-Enhanced (Reranked)", "hybrid", ml_retrieval_engine),
+            ):
+                try:
+                    resp = engine_inst.retrieve(
+                        scenario.task_prompt,
+                        project_id=scenario.project_id,
+                        method=method_name,
+                        top_k=5,
+                    )
+                    items_k = resp.results[:5]
+                    mids_k = [it.memory_id for it in items_k]
+                except Exception:
+                    items_k = []
+                    mids_k = []
+    
+                rel_ids = []
+                irr_ids = []
+                for it in items_k:
+                    c_low = it.content.lower()
+                    is_rel = (
+                        any(f.lower() in c_low for f in scenario.expected_facts) or
+                        any(d.lower() in c_low for d in scenario.expected_decisions) or
+                        any(c.lower() in c_low for c in scenario.expected_constraints) or
+                        any(cf.lower() in c_low for cf in scenario.expected_conflicts)
+                    )
+                    if is_rel:
+                        rel_ids.append(it.memory_id)
+                    else:
+                        irr_ids.append(it.memory_id)
+    
+                n_ret = len(mids_k)
+                n_rel = len(rel_ids)
+                p_val = (n_rel / n_ret) if n_ret > 0 else 0.0
+                r_val = (n_rel / target_ground_truth_count)
+                f1_val = (2 * p_val * r_val) / (p_val + r_val) if (p_val + r_val) > 0 else 0.0
+                irr_val = (len(irr_ids) / n_ret) if n_ret > 0 else 0.0
+    
+                mrr_val = 0.0
+                for r_idx, mid in enumerate(mids_k, 1):
+                    if mid in rel_ids:
+                        mrr_val = 1.0 / r_idx
+                        break
+    
+                dcg = 0.0
+                for r_idx, mid in enumerate(mids_k, 1):
+                    if mid in rel_ids:
+                        dcg += 1.0 / math.log2(r_idx + 1)
+                idcg = sum(1.0 / math.log2(i + 1) for i in range(1, min(5, target_ground_truth_count) + 1))
+                ndcg_val = (dcg / idcg) if idcg > 0 else 1.0
+    
+                strategy_metrics_map[strat_name] = {
+                    "precision_at_k": p_val,
+                    "recall_at_k": r_val,
+                    "f1_score": f1_val,
+                    "mrr": mrr_val,
+                    "ndcg_at_k": ndcg_val,
+                    "irrelevant_rate": irr_val,
+                    "retrieved_count": n_ret,
+                    "relevant_count": n_rel,
+                    "total_ground_truth": target_ground_truth_count,
+                }
+    
+            # 5. Prepare Context for the task prompt using standard Hybrid engine
+            inp = AgentInteractionInput(
+                project_id=scenario.project_id,
+                agent_id="agent-brain-enabled",
+                session_id="sess-bench-eval",
+                content=scenario.task_prompt,
+            )
+            ctx_result = loop.prepare_context(inp)
+            context_pkg = ctx_result.context_package
+            context_md = context_pkg.to_markdown() if context_pkg else ""
+    
+            # Measure tokens
+            prompt_tokens = self.tokenizer.count_tokens(scenario.task_prompt)
+            ctx_tokens = self.tokenizer.count_tokens(context_md)
+            agent_input_tokens = prompt_tokens + ctx_tokens
+    
+            # Raw memory tokens before Context Builder compression/knapsack packing
+            retrieved_items = ctx_result.retrieval_response.results if ctx_result.retrieval_response else ()
+            raw_memory_tokens = sum(self.tokenizer.count_tokens(item.content) for item in retrieved_items)
+    
+            # Simulated Brain-aware agent incorporates context package directly
+            context_lower = context_md.lower()
+            agent_output_parts = [f"Executing task: {scenario.task_prompt}"]
+    
+            # Check if genuine dispute warnings exist
+            has_dispute_warning = (
+                ("disputed" in context_lower or "warning" in context_lower or bool(context_pkg and context_pkg.has_disputes)) and
+                scenario.conflict_ground_truth == ConflictGroundTruth.GENUINE_CONTRADICTION
+            )
+            if has_dispute_warning and scenario.expected_conflicts:
+                agent_output_parts.append(
+                    f"DISPUTE DETECTED: Historical records contain contradictory claims regarding "
+                    f"{' vs '.join(scenario.expected_conflicts)}. Preserved dispute warning; flagging for team resolution."
+                )
+    
+            # Incorporate recalled facts & decisions
+            recalled_items = []
+            for fact in scenario.expected_facts:
+                if fact.lower() in context_lower:
+                    recalled_items.append(f"Fact verified: {fact}")
+            for dec in scenario.expected_decisions:
+                if dec.lower() in context_lower or any(word in context_lower for word in dec.lower().split()[:3]):
+                    recalled_items.append(f"Prior decision maintained: {dec}")
+            for const in scenario.expected_constraints:
+                if const.lower() in context_lower or any(word in context_lower for word in const.lower().split()[:2]):
+                    recalled_items.append(f"Technical constraint applied: {const}")
+    
+            if recalled_items:
+                agent_output_parts.append("Applied persistent Brain knowledge:\n- " + "\n- ".join(recalled_items))
+            else:
+                agent_output_parts.append("Proceeded with available context.")
+    
+            agent_output = "\n\n".join(agent_output_parts)
+            output_tokens = self.tokenizer.count_tokens(agent_output)
+            total_tokens = agent_input_tokens + output_tokens
+    
+            tokens = ScenarioTokenAudit(
+                task_prompt_tokens=prompt_tokens,
+                available_history_tokens=history_tokens,
+                supplied_history_tokens=ctx_tokens,
+                omitted_history_tokens=max(0, history_tokens - raw_memory_tokens),
+                retrieved_memory_tokens=raw_memory_tokens,
+                context_builder_tokens=ctx_tokens,
+                agent_input_tokens=agent_input_tokens,
+                agent_output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                tokenizer_name="DeterministicTokenizer (~4 chars/token approximation)",
+            )
+    
+            # Outcomes evaluation
+            combined_text = (context_md + " " + agent_output).lower()
+            facts_recovered = sum(1 for f in scenario.expected_facts if f.lower() in combined_text)
+            facts_missed = len(scenario.expected_facts) - facts_recovered
+            facts_recovery_rate = (facts_recovered / len(scenario.expected_facts)) if scenario.expected_facts else 1.0
+    
+            decisions_maintained = sum(
+                1 for d in scenario.expected_decisions
+                if d.lower() in combined_text or all(w in combined_text for w in d.lower().split()[:2])
+            )
+            decisions_maintenance_rate = (decisions_maintained / len(scenario.expected_decisions)) if scenario.expected_decisions else 1.0
+    
+            constraints_adhered = sum(
+                1 for c in scenario.expected_constraints
+                if c.lower() in combined_text or any(w in combined_text for w in c.lower().split()[:2])
+            )
+            constraints_violated = len(scenario.expected_constraints) - constraints_adhered
+            constraints_adherence_rate = (constraints_adhered / len(scenario.expected_constraints)) if scenario.expected_constraints else 1.0
+    
+            missing_notes = []
+            for f in scenario.expected_facts:
+                if f.lower() not in combined_text:
+                    missing_notes.append(f"Omitted fact: {f}")
+            for d in scenario.expected_decisions:
+                if d.lower() not in combined_text and not all(w in combined_text for w in d.lower().split()[:2]):
+                    missing_notes.append(f"Superseded/missed decision: {d}")
+            for c in scenario.expected_constraints:
+                if c.lower() not in combined_text and not any(w in combined_text for w in c.lower().split()[:2]):
+                    missing_notes.append(f"Constraint not explicitly verified: {c}")
+    
+            repeated_explanations = facts_missed + constraints_violated
+    
+            # Conflict handling: True positive for genuine contradictions; True negative for compatible claims
+            conflict_detected = bool(has_dispute_warning)
+            if scenario.conflict_ground_truth == ConflictGroundTruth.GENUINE_CONTRADICTION:
+                conflict_handled = conflict_detected
+            else:
+                conflict_handled = not conflict_detected
+    
+            stale_used = sum(1 for item in retrieved_items if item.status == "SUPERSEDED")
+    
+            base_partial = (
+                0.35 * facts_recovery_rate +
+                0.35 * decisions_maintenance_rate +
+                0.30 * constraints_adherence_rate
+            )
+            if not scenario.expected_facts and not scenario.expected_decisions and not scenario.expected_constraints:
+                partial_score = 1.0 if conflict_handled else 0.0
+            elif scenario.conflict_ground_truth == ConflictGroundTruth.GENUINE_CONTRADICTION:
+                partial_score = 0.6 * base_partial + 0.4 * (1.0 if conflict_handled else 0.0)
+            else:
+                partial_score = base_partial * (0.5 if stale_used > 0 else 1.0)
+    
+            # Retrieval accuracy classification
+            retrieved_ids = tuple(item.memory_id for item in retrieved_items)
+            relevant_ids = []
+            irrelevant_ids = []
+            for item in retrieved_items:
+                c_low = item.content.lower()
+                is_rel = any(f.lower() in c_low for f in scenario.expected_facts) or \
+                         any(d.lower() in c_low for d in scenario.expected_decisions) or \
+                         any(c.lower() in c_low for c in scenario.expected_constraints) or \
+                         any(cf.lower() in c_low for cf in scenario.expected_conflicts)
+                if is_rel:
+                    relevant_ids.append(item.memory_id)
+                else:
+                    irrelevant_ids.append(item.memory_id)
+    
+            task_success = (
+                facts_recovery_rate >= 0.75
+                and decisions_maintenance_rate >= 0.75
+                and constraints_violated == 0
+                and conflict_handled
+                and stale_used == 0
+            )
+    
+            elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+    
+            return ConditionRunResult(
+                scenario_id=scenario.scenario_id,
+                condition=BenchmarkCondition.AI_BRAIN,
+                agent_id="agent-brain-enabled",
+                agent_output=agent_output,
+                tokens=tokens,
+                retrieved_memory_ids=retrieved_ids,
+                relevant_retrieved_ids=tuple(relevant_ids),
+                irrelevant_retrieved_ids=tuple(irrelevant_ids),
+                facts_recovery_rate=facts_recovery_rate,
+                decisions_maintenance_rate=decisions_maintenance_rate,
+                constraints_adherence_rate=constraints_adherence_rate,
+                partial_success_score=partial_score,
+                task_success=task_success,
+                facts_recovered_count=facts_recovered,
+                facts_missed_count=facts_missed,
+                decisions_maintained_count=decisions_maintained,
+                constraints_violated_count=constraints_violated,
+                repeated_explanations_needed=repeated_explanations,
+                conflict_detected=conflict_detected,
+                conflict_handled_correctly=conflict_handled,
+                stale_memories_used_count=stale_used,
+                execution_time_ms=elapsed_ms,
+                missing_details_notes=tuple(missing_notes),
+                retrieval_strategy_results=strategy_metrics_map,
+            )
+    
+        finally:
+            if loop is not None:
+                try:
+                    loop.close()
+                except Exception:
+                    pass
+            try:
+                ev_store.close()
+            except Exception:
+                pass
+            try:
+                vec_store.close()
+            except Exception:
+                pass
 
     # Backwards-compatible aliases
     def run_condition_b(self, scenario: BenchmarkScenario) -> ConditionRunResult:

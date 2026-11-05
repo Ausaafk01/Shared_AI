@@ -792,11 +792,34 @@ print(f"Claude Output: {claude_res.content}")
 
 ## Running Automated Tests
 
-Run all 338 collected automated tests (334 passing, 4 live provider tests skipped offline) across the Event System, Memory Model, Memory Extraction, Memory Updating, Conflict Management, Knowledge Graph, Vector Memory, Retrieval Engine, Context Builder, Brain Loop, Multi-Agent System, Machine Learning Layer, Benchmarking Framework, and Storage Lifecycle:
+Run all 343 collected automated tests (339 passing, 4 live provider tests skipped offline) across the Event System, Memory Model, Memory Extraction, Memory Updating, Conflict Management, Knowledge Graph, Vector Memory, Retrieval Engine, Context Builder, Brain Loop, Multi-Agent System, Machine Learning Layer, Benchmarking Framework, and Storage Lifecycle:
 
 ```bash
-python -m unittest discover -s tests -v
+python -W error::ResourceWarning -m unittest discover -s tests -v
 ```
+
+### Exact Test Inventory by Test File (343 Discovered Tests)
+| Test Module | Discovered Tests | Status | Description |
+| :--- | :---: | :---: | :--- |
+| `tests/test_adapters.py` | 15 | 11 Passed, 4 Skipped | Anthropic, Codex, Gemini, Antigravity provider adapters (mock & live) |
+| `tests/test_agents.py` | 14 | 14 Passed | Agent abstraction, registry persistence, secret filtering, simulated agents |
+| `tests/test_benchmarks.py` | 21 | 21 Passed | Conditions A/B/C isolation, McNemar, Student's t stats, exception safety |
+| `tests/test_collaboration.py` | 3 | 3 Passed | Multi-stage collaboration workflows & step execution |
+| `tests/test_conflicts.py` | 28 | 28 Passed | Conflict detection, multi-factor evidence scoring & resolution lifecycle |
+| `tests/test_context.py` | 34 | 34 Passed | Knapsack budget packing, markdown formatting, dispute omission notices |
+| `tests/test_extensibility.py` | 4 | 4 Passed | Custom extensible event types & validation |
+| `tests/test_extraction.py` | 21 | 21 Passed | Deterministic rule-based memory extraction & filtering |
+| `tests/test_graph.py` | 26 | 26 Passed | KnowledgeGraph structure, BFS/DFS traversal & tenant isolation |
+| `tests/test_loop.py` | 48 | 48 Passed | BrainLoop orchestration, retry idempotency, stage recovery & lifecycle |
+| `tests/test_memory_models.py` | 13 | 13 Passed | Memory models, immutability & versioning pointer serialization |
+| `tests/test_ml.py` | 28 | 28 Passed | Lexical/temporal/graph features, grouped CV & supervised prototypes |
+| `tests/test_models.py` | 10 | 10 Passed | Event model immutability & deterministic UUID v5 generation |
+| `tests/test_retrieval.py` | 27 | 27 Passed | Vector, Graph, Hybrid RRF & ML-enhanced retrieval & scoring breakdown |
+| `tests/test_sessions.py` | 6 | 6 Passed | Multi-agent session continuity & SQLite storage persistence |
+| `tests/test_storage.py` | 16 | 16 Passed | Append-only SQLite events, corruption recovery, context managers & GC |
+| `tests/test_updating.py` | 11 | 11 Passed | Rules A-E, monotonic version chains & duplicate handling |
+| `tests/test_vectors.py` | 18 | 18 Passed | VectorRecord, cosine similarity, index management & status filtering |
+| **Total Discovered** | **343** | **339 Passed, 4 Skipped** | **0 Failures, 0 Errors, 0 Resource Warnings** |
 
 ### Running Demonstrations
 
@@ -882,31 +905,156 @@ python scripts/run_benchmarks.py
 - [x] **Reconciled Avoided Explanations Formula**: Strict scenario-level arithmetic directly summing to 94 across all 10 categories ($105$ required in A vs $11$ in C = $94$ avoided, 89.52% reduction), ensuring omitted or unretrieved facts increase Condition C's needed explanations and never count as avoided.
 - [x] **Cluster-Stratified Analysis & Exact Student's t Statistical Qualification**: Paired exact McNemar's tests on binary task success (A vs B: $p < 0.001$, A vs C: $p < 0.001$, B vs C: $p = 0.3877$), paired Student's t-tests, and cluster-stratified category analysis ($K=10$ clusters, $df=9$) reporting cluster standard errors ($SE = 0.104822$), cluster $t$-statistics ($t = 6.6780$), numerically evaluated two-tailed Student's t $p$-values ($p = 9.0787 \times 10^{-5}$ via composite Simpson's rule numerical integration), and full-precision 95% confidence intervals using the exact Student's t critical value ($t_{\text{crit}} = 2.262157162798205$ at $df=9$, e.g. Task Success $[+0.462876, +0.937124]$ and Token Overhead $[142.9715875613, 600.6950791054]$, presented as $[142.9716, 600.6951]$ and rounded to two decimals as $[142.97, 600.70]$ with numerically evaluated two-tailed Student's t $p$-value = $0.00511227$). Explicitly qualified as exploratory and conditional on treating categories as independent clusters; token difference ($+371.833333$ tokens, $C - A$) explicitly defined as additional token overhead rather than performance improvement. Summary statistics and regression tests verify exact mathematical agreement across all five metrics.
 - [x] **Automated Reporting Framework & Full Precision Storage**: Machine-readable JSON (`benchmarks_report.json`) and Markdown (`benchmarks_report.md`) exports displaying at least four decimal places for all category differences, preferring six decimal places for repeating fractions, and storing unrounded full-precision IEEE-754 floats in JSON. Displayed vectors reproduce reported means, standard deviations, standard errors, t-statistics, and full-precision 95% confidence intervals within $< 10^{-6}$ tolerance.
-- [x] **Full Regression Verification**: All 316 prior tests preserved + 20 benchmark tests + 2 storage/loop lifecycle tests = 338 tests collected: 334 passed, 4 live provider tests skipped. All 8 demonstrations working offline.
+- [x] **Full Regression Verification**: All 316 prior tests preserved + 21 benchmark tests + 6 storage/loop lifecycle tests = 343 tests collected: 339 passed, 4 live provider tests skipped offline. All 8 demonstrations working offline.
 
-### Comprehensive Audit & Error Correction Summary (Phases 1–4)
-- [x] **SQLite Resource Leakage Elimination**: Implemented `__del__` safety finalizers and context manager support (`__enter__` / `__exit__`) across all 6 persistent storage classes (`SQLiteEventStore`, `SQLiteInteractionStore`, `SQLiteVectorStore`, `SQLiteAgentRegistryStore`, `SQLiteSessionStore`, `SQLiteFeedbackStore`). Prevents unclosed connection warnings and file descriptor exhaustion upon object garbage collection.
-- [x] **Brain Loop Resource Lifecycle Management**: Added `__del__`, `__enter__`, and `__exit__` support to `BrainLoop`, ensuring owned SQLite interaction stores are safely closed on destruction.
-- [x] **Benchmark Runner & Test Fixture Cleanup**: Fixed orphaned `BrainLoop` references in `BenchmarkRunner._run_ai_brain_condition` and unit tests in `tests/test_loop.py` to ensure explicit `.close()` invocation in execution `finally` blocks.
-- [x] **Storage Type Annotation & Defensive Guards**: Resolved missing `Any` import in `ai_brain/loop/storage/sqlite.py` and added idempotent closed-state guards in `SQLiteFeedbackStore.close()`.
-- [x] **Audited Zero-Leakage Test Execution**: Complete test suite passes with zero `ResourceWarning` emissions under Python 3.13 (`python -W error::ResourceWarning -m unittest discover -s tests -v`).
+### Comprehensive Audit & Resource Lifecycle Verification (Phases 1–4)
+- [x] **Primary Resource-Management Architecture**: Primary resource cleanup is governed strictly by explicit `.close()` calls and standard Python context management protocols (`with` statements). The `__del__` finalizer is retained strictly as a fallback / safety net for orphaned garbage collection and is never relied upon as the primary cleanup mechanism.
+- [x] **Close Idempotency & Defense**: Confirmed and verified that `.close()` is fully idempotent across all 6 persistent storage classes (`SQLiteEventStore`, `SQLiteInteractionStore`, `SQLiteVectorStore`, `SQLiteAgentRegistryStore`, `SQLiteSessionStore`, `SQLiteFeedbackStore`) and `BrainLoop`. Repeated calls are safe no-ops.
+- [x] **Exception Safety in Context Managers**: All storage classes and `BrainLoop` implement `__enter__` and `__exit__`. Context managers guarantee immediate resource closure on both normal exit and unhandled exception paths.
+- [x] **BenchmarkRunner Exception-Safe Cleanup**: Wrapped `run_condition_c_brain` in comprehensive `try ... finally` blocks, guaranteeing that `loop`, `ev_store`, and `vec_store` are reliably closed regardless of whether execution completes successfully or raises an exception.
+- [x] **Partially Initialized Instance Safety**: Finalizers and `.close()` methods guard against uninitialized attributes (e.g. `_conn`, `_lock`), preventing secondary `AttributeError` exceptions if object initialization fails partway through.
+- [x] **Audited Zero-Leakage Test Execution**: The entire test suite executes with zero warnings under strict elevation (`python -W error::ResourceWarning -m unittest discover -s tests -v`).
 
-### Phase 5: Production Backend, Distributed Persistence & Enterprise Infrastructure (Planned / Unimplemented)
-> **Status:** Architecture Designed & Prerequisites Established (Implementation Not Started).
-> **Implementation Scope:** REST/gRPC API service layer, production PostgreSQL persistence, enterprise Auth/RBAC, multi-tenant concurrency, background job workers, production vector database integration, OpenTelemetry instrumentation, and horizontal containerized deployment.
+### Accurate Phase Relationships & Component Dependency Architecture
 
-#### Prerequisites Completed in Phases 1–4:
-1. **Deterministic Core Invariants**: Engine-level append-only events, immutable version chains, deterministic token budgets, and strict project tenant isolation verified.
-2. **Abstract Storage Interfaces**: Abstract base classes defined for `EventStore`, `VectorStore`, `AgentRegistryStore`, `SessionStore`, `InteractionStore`, and `FeedbackStore`, allowing drop-in production adapters.
-3. **Decoupled Agent Transports**: Unified provider adapters with complete credential isolation and payload schema compliance across OpenAI, Anthropic, Gemini, and Antigravity.
-4. **Offline Benchmarking Baseline**: Authoritative 30-scenario benchmark suite with exact statistical tests and verified token accounting.
+#### Phase Relationship Model
+```
+  +-------------------------------------------------------------------------+
+  |              Phase 1: Core Brain Architecture (Foundational)            |
+  |  (Events, Memories, Updating, Conflicts, Graph, Vectors, Context, Loop) |
+  +--------------------+--------------------------------+-------------------+
+                       |                                |
+                       v                                v
+  +------------------------------------+  +---------------------------------+
+  |    Phase 2: Multi-Agent System     |  | Phase 3: Machine Learning Layer |
+  | (Registry, Sessions, Switcher,     |  | (Features, Calibrated Models,   |
+  |  Adapters, Collaboration Engine)   |  |  Grouped CV, Feedback Store)    |
+  +--------------------+---------------+  +----------------+----------------+
+                       |                                   |
+                       +-----------------+-----------------+
+                                         |
+                                         v
+  +-------------------------------------------------------------------------+
+  |             Phase 4: System Benchmarking & Comparative Framework        |
+  |  (30 Scenarios, Conditions A/B/C, McNemar, Cluster t-Stats, Reporting)  |
+  +--------------------------------------+----------------------------------+
+                                         |
+                                         v
+  +-------------------------------------------------------------------------+
+  |    Phase 5: Production Backend & Infrastructure (Planned / Evaluation)  |
+  |  (Production DB, API Service Layer, Auth/RBAC, Workers, Observability)  |
+  +-------------------------------------------------------------------------+
+```
 
-#### Phase 5 Target Architecture & Technical Requirements:
-- [ ] **API Service Layer**: FastAPI/Uvicorn asynchronous REST API and optional gRPC endpoints for low-latency agent interaction streams, context assembly, and event ingestion.
-- [ ] **Distributed Database Persistence**: Migration from embedded SQLite to production PostgreSQL 16+ with TimescaleDB extension for high-throughput append-only event streams, connection pooling (PgBouncer), and partitioned tables.
-- [ ] **Enterprise Authentication & RBAC**: JWT/OIDC authentication middleware, tenant cryptographic boundaries, role-based access control (Admin, Agent, Auditor, Read-Only), and automated secret redaction.
-- [ ] **Multi-Agent Shared Concurrency**: Distributed locking (Redis Redlock) and optimistic concurrency control for concurrent agent sessions interacting with shared project knowledge graphs.
-- [ ] **Asynchronous Background Workers**: Distributed task queues (Celery/Temporal with Redis/RabbitMQ) for asynchronous memory extraction, offline graph re-indexing, ML reranking model retraining, and archival compaction.
-- [ ] **Production Vector Database**: Scalable vector search integration (pgvector or Qdrant cluster) replacing in-memory SQLite cosine similarity, supporting filtered HNSW indexing and distributed shards.
-- [ ] **Telemetry, Observability & Tracing**: Structured JSON logging, Prometheus metrics (retrieval latency, token utilization, cache hit ratios), and OpenTelemetry distributed tracing across agent handoffs.
-- [ ] **Horizontal Deployment & Resilience**: Docker containerization, Kubernetes Helm charts, health/readiness probes, graceful shutdown hooks, and zero-downtime database schema migrations via Alembic.
+#### Decoupled Component Dependency Architecture
+```
+                         +-----------------------------+
+                         |      Append-Only Events     |
+                         |     (SQLiteEventStore)      |
+                         +--------------+--------------+
+                                        |
+                   +--------------------+--------------------+
+                   v                                         v
+  +---------------------------------+       +---------------------------------+
+  |          Memory Models          |       |        Multi-Agent System       |
+  | (Versioning, Extraction, Update)|       | (Registry, Sessions, Adapters)  |
+  +----------------+----------------+       +----------------+----------------+
+                   |                                         |
+         +---------+---------+                               |
+         v                   v                               |
++-----------------+ +-----------------+                      |
+| Knowledge Graph | |  Vector Memory  |                      |
+|  (Traversals)   | | (Semantic Cosine)                      |
++--------+--------+ +--------+--------+                      |
+         |                   |                               |
+         +---------+---------+                               |
+                   v                                         v
+        +---------------------+                   +---------------------+
+        |  Retrieval Engine   |                   |  Brain Loop Facade  |
+        |  (Hybrid RRF, ML)   |<------------------| (11-Stage Lifecycle)|
+        +----------+----------+                   +----------+----------+
+                   |                                         |
+                   v                                         |
+        +---------------------+                              |
+        |   Context Builder   |                              |
+        | (Knapsack, Markdown)|<-----------------------------+
+        +----------+----------+                              |
+                   |                                         |
+                   +--------------------+--------------------+
+                                        v
+                         +-----------------------------+
+                         |    Evaluation & Benchmarks  |
+                         | (Conditions A/B/C, Reporter)|
+                         +-----------------------------+
+```
+
+### Phase 5: Architecture Evaluation & Trade-Off Analysis (Planned / Unimplemented)
+> **Status:** Architecture Designed & Trade-Off Options Evaluated (Implementation Has Not Started).
+> **Implementation Directive:** Do not assume or prescribe high-complexity tools (e.g. TimescaleDB, Redis Redlock, gRPC, Qdrant, Temporal, Kubernetes) without demonstrating technical requirements that justify their operational complexity.
+
+The following architectural trade-offs require formal evaluation during Phase 5 design:
+
+#### 1. PostgreSQL Native Partitioning vs. TimescaleDB
+- **Option A (PostgreSQL Native Declarative Partitioning — Recommended Initial Choice)**:
+  - *Requirements*: Standard PostgreSQL 16+ without specialized kernel extensions. Partition `events` table by range (`timestamp`) and sub-partition by list (`project_id`).
+  - *Trade-Offs*: Zero external operational dependencies, standard backup/restore tooling (`pg_dump`/`pg_basebackup`), standard Alembic migrations. Lacks automated hypertable chunk compression and native continuous aggregates.
+  - *Operational Complexity*: Low.
+  - *Justification Conditions*: Sufficient for event ingestion throughput up to thousands of events/sec and standard table sizes (<50M rows).
+- **Option B (TimescaleDB Extension)**:
+  - *Requirements*: TimescaleDB extension compiled and enabled in PostgreSQL.
+  - *Trade-Offs*: Automated chunk creation, 90%+ transparent time-series compression, high-performance continuous aggregates. Introduces cloud lock-in / portability constraints, custom extension build dependencies, and specialized upgrade procedures.
+  - *Operational Complexity*: Medium to High.
+  - *Justification Conditions*: Justified only if append-only event volume reaches massive scale (>10M events/day) where disk footprint and automated chunk dropping become acute constraints.
+
+#### 2. PostgreSQL In-Database Concurrency vs. Redis Distributed Locking (Redlock)
+- **Option A (PostgreSQL Transactions, Optimistic Concurrency & Advisory Locks — Recommended Initial Choice)**:
+  - *Requirements*: PostgreSQL native transactions (`READ COMMITTED` / `REPEATABLE READ`), version columns on memory records (`OCC`), and session/transaction-scoped advisory locks (`pg_advisory_xact_lock`).
+  - *Trade-Offs*: Zero extra infrastructure dependencies; locks release automatically upon transaction rollback or connection termination, eliminating orphaned lock deadlocks. Guarantees transactional atomicity across events, memories, and locks.
+  - *Operational Complexity*: Minimal (single operational datastore to monitor and backup).
+  - *Justification Conditions*: Strongly recommended for all multi-agent coordination within standard scale (up to thousands of concurrent agent sessions).
+- **Option B (Redis Distributed Locking / Redlock)**:
+  - *Requirements*: Independent Redis cluster (minimum 3–5 independent master nodes for true Redlock algorithm safety).
+  - *Trade-Offs*: Sub-millisecond lock acquisition latency, offloads lock contention from relational database. However, introduces clock-drift vulnerabilities, network partition split-brain risks, split-state failure modes between Redis and PostgreSQL, and additional infrastructure overhead.
+  - *Operational Complexity*: High.
+  - *Justification Conditions*: Justified only if lock churn threatens to exhaust PostgreSQL connection pool capacity (>10,000 lock acquisitions/sec across decoupled microservices).
+
+#### 3. REST-Only vs. REST + gRPC Dual Interface
+- **Option A (REST-Only via FastAPI / OpenAPI — Recommended Initial Choice)**:
+  - *Requirements*: Standard HTTP/1.1 or HTTP/2 JSON endpoints with Server-Sent Events (SSE) for streaming agent responses.
+  - *Trade-Offs*: Universal interoperability across languages, API gateways, web browsers, and CLI tooling. Zero protocol compilation steps. Slightly higher payload parsing overhead than binary serialization.
+  - *Operational Complexity*: Low.
+  - *Justification Conditions*: Recommended default for initial service layer, fully supporting all agent interaction streams and webhooks.
+- **Option B (REST + gRPC Dual Interface)**:
+  - *Requirements*: Protocol Buffers (proto3) schema compiler, HTTP/2 multiplexing, dual-stack endpoint definitions.
+  - *Trade-Offs*: High binary throughput, strongly-typed multi-language SDK code generation, bidirectional streaming. Requires specialized HTTP/2 trailing metadata proxying, complicates browser/curl debugging, and requires maintaining dual API contracts.
+  - *Operational Complexity*: High.
+  - *Justification Conditions*: Justified only if internal inter-service latency (<5ms) and high-frequency binary event ingestion become demonstrated bottlenecks across a microservice fleet.
+
+#### 4. pgvector vs. Dedicated External Vector Database (e.g. Qdrant / Milvus)
+- **Option A (pgvector in PostgreSQL — Recommended Initial Choice)**:
+  - *Requirements*: `pgvector` extension enabled in PostgreSQL (HNSW indexing).
+  - *Trade-Offs*: Zero data drift: vector embeddings, relational memory entities, and event provenance reside in the same ACID database. Allows transactional vector inserts in the same transaction as memory creation. Enables combined relational SQL filtering (`WHERE project_id = ... AND status = 'ACTIVE'`) with HNSW cosine search.
+  - *Operational Complexity*: Low (standard database backups protect relational data and vectors simultaneously).
+  - *Justification Conditions*: Recommended default for collections up to several million embeddings.
+- **Option B (Dedicated Vector DB Cluster — Qdrant / Milvus)**:
+  - *Requirements*: Independent vector database cluster, background synchronization pipeline, dual-write consistency management.
+  - *Trade-Offs*: Advanced vector-specific indexing features (scalar/product quantization, disk-backed payloads, decoupled vector compute scaling). Introduces split-brain risk, dual-write synchronization lag (eventual consistency), separate backups, and complex rollbacks.
+  - *Operational Complexity*: High.
+  - *Justification Conditions*: Justified only if vector collections exceed tens of millions of embeddings or require specialized GPU-accelerated indexing.
+
+#### 5. Lightweight Background Processing vs. Celery vs. Temporal
+- **Option A (In-Process Asyncio Workers or RQ — Recommended Initial Choice)**:
+  - *Requirements*: Python `asyncio.create_task` worker loops or lightweight Redis Queue (RQ).
+  - *Trade-Offs*: Minimal operational footprint, easy local debugging, fast startup, low memory overhead. Lacks complex workflow choreography, multi-hour saga rollbacks, and distributed retry trees.
+  - *Operational Complexity*: Low.
+  - *Justification Conditions*: Recommended for asynchronous memory extraction, vector indexing, and status notification tasks.
+- **Option B (Celery Task Queue)**:
+  - *Requirements*: Celery worker processes, message broker (RabbitMQ/Redis), result backend.
+  - *Trade-Offs*: Proven task queue with rate limiting, task retries, cron schedules (Celery Beat), and worker concurrency pools. Requires broker management, tricky serialization of custom domain models, and monitoring overhead (Flower).
+  - *Operational Complexity*: Medium.
+  - *Justification Conditions*: Suitable if background tasks require distributed rate limiting and isolated worker node pools.
+- **Option C (Temporal Workflow Engine)**:
+  - *Requirements*: Temporal server cluster, PostgreSQL/Cassandra state persistence, and Temporal SDK worker fleet.
+  - *Trade-Offs*: Deterministic workflow orchestration, persistent execution state across server restarts, automatic activity retries with exponential backoff, and stateful sagas. Steep learning curve, high architectural complexity, and dedicated infrastructure.
+  - *Operational Complexity*: Very High.
+  - *Justification Conditions*: Justified only if long-running multi-day human-in-the-loop multi-agent workflows with stateful compensation transactions are mandated.

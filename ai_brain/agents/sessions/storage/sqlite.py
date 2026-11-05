@@ -30,7 +30,8 @@ class SQLiteSessionStore(SessionStore):
     def __init__(self, database_path: Union[str, Path] = "sessions.db") -> None:
         self.database_path = str(database_path)
         self._lock = threading.RLock()
-        self._closed = False
+        self._conn: Optional[sqlite3.Connection] = None
+        self._closed = True
 
         if self.database_path != ":memory:":
             db_dir = Path(self.database_path).parent
@@ -54,6 +55,7 @@ class SQLiteSessionStore(SessionStore):
                     pass
             self._conn.execute("PRAGMA synchronous=NORMAL;")
             self._create_schema()
+            self._closed = False
         except sqlite3.Error as e:
             raise SessionError(f"Failed to initialize SQLite session store: {e}") from e
 
@@ -178,14 +180,29 @@ class SQLiteSessionStore(SessionStore):
                 raise SessionError(f"Failed to delete session '{session_id}': {e}") from e
 
     def close(self) -> None:
-        """Close SQLite database connection."""
-        with self._lock:
-            if not self._closed:
-                try:
-                    self._conn.close()
-                except sqlite3.Error:
-                    pass
+        """Close SQLite database connection (idempotent)."""
+        if getattr(self, "_closed", False):
+            return
+        lock = getattr(self, "_lock", None)
+        if lock is not None:
+            with lock:
+                if getattr(self, "_closed", False):
+                    return
+                conn = getattr(self, "_conn", None)
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except sqlite3.Error:
+                        pass
                 self._closed = True
+        else:
+            conn = getattr(self, "_conn", None)
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            self._closed = True
 
     def __enter__(self) -> "SQLiteSessionStore":
         return self

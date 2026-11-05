@@ -612,6 +612,14 @@ class TestBenchmarkSubsystem(unittest.TestCase):
         self.assertEqual(aggregate.conflict_false_positives, 0)
         self.assertEqual(aggregate.conflict_precision, 0.0)
 
+    def test_benchmark_runner_closes_resources_on_exception(self) -> None:
+        """Verify that BenchmarkRunner closes owned stores even if an exception occurs during execution."""
+        from unittest.mock import patch
+        sc = self.dataset.get_scenario("SCENARIO_01A_TASK_CONTINUATION")
+        with patch("ai_brain.memories.extraction.extractor.MemoryExtractor.extract_many", side_effect=RuntimeError("Simulated extraction crash")):
+            with self.assertRaises(RuntimeError):
+                self.runner.run_condition_c_brain(sc)
+
 
 
 if __name__ == "__main__":

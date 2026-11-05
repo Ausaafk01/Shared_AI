@@ -365,6 +365,68 @@ class TestSQLiteResourceManagementAndLifecycle(unittest.TestCase):
                 res_warns = [w for w in captured if issubclass(w.category, ResourceWarning)]
                 self.assertEqual(len(res_warns), 0, f"ResourceWarning emitted during GC for {factory}")
 
+    def test_sqlite_stores_close_idempotency(self) -> None:
+        """Verify calling close() multiple times is a safe idempotent no-op across all stores."""
+        store_factories = [
+            lambda: SQLiteEventStore(":memory:"),
+            lambda: SQLiteInteractionStore(":memory:"),
+            lambda: SQLiteVectorStore(":memory:"),
+            lambda: SQLiteAgentRegistryStore(":memory:"),
+            lambda: SQLiteSessionStore(":memory:"),
+            lambda: SQLiteFeedbackStore(":memory:"),
+        ]
+
+        for factory in store_factories:
+            store = factory()
+            self.assertFalse(store._closed)
+            # First close
+            store.close()
+            self.assertTrue(store._closed)
+            # Repeated close calls must not raise
+            store.close()
+            store.close()
+            self.assertTrue(store._closed)
+
+    def test_sqlite_stores_context_manager_exception_safety(self) -> None:
+        """Verify context manager guarantees resource closure even when exceptions are raised."""
+        store_factories = [
+            lambda: SQLiteEventStore(":memory:"),
+            lambda: SQLiteInteractionStore(":memory:"),
+            lambda: SQLiteVectorStore(":memory:"),
+            lambda: SQLiteAgentRegistryStore(":memory:"),
+            lambda: SQLiteSessionStore(":memory:"),
+            lambda: SQLiteFeedbackStore(":memory:"),
+        ]
+
+        for factory in store_factories:
+            captured_store = None
+            with self.assertRaises(RuntimeError):
+                with factory() as store:
+                    captured_store = store
+                    self.assertFalse(store._closed)
+                    raise RuntimeError("Simulated failure inside with block")
+            self.assertIsNotNone(captured_store)
+            self.assertTrue(captured_store._closed)
+
+    def test_sqlite_stores_partially_initialized_safety(self) -> None:
+        """Verify finalizers and close() methods are defensive on partially initialized instances."""
+        classes = [
+            SQLiteEventStore,
+            SQLiteInteractionStore,
+            SQLiteVectorStore,
+            SQLiteAgentRegistryStore,
+            SQLiteSessionStore,
+            SQLiteFeedbackStore,
+        ]
+
+        for cls in classes:
+            # Allocate without running __init__
+            raw_instance = cls.__new__(cls)
+            # close() and __del__() must not crash with AttributeError
+            raw_instance.close()
+            raw_instance.__del__()
+            self.assertTrue(getattr(raw_instance, "_closed", False))
+
 
 if __name__ == "__main__":
     unittest.main()

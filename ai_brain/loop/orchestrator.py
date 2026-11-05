@@ -97,6 +97,7 @@ class BrainLoop:
     ) -> None:
         if event_store is None:
             raise ValueError("An EventStore instance is required for BrainLoop")
+        self._closed = False
         self.event_store = event_store
         self.ml_service = ml_service
 
@@ -159,12 +160,15 @@ class BrainLoop:
         return self.memory_handler.vector_manager
 
     def close(self) -> None:
-        """Close storage connections."""
-        if hasattr(self.interaction_store, "close"):
-            try:
-                self.interaction_store.close()
-            except Exception:
-                pass
+        """Close storage connections (idempotent)."""
+        if not getattr(self, "_closed", False):
+            self._closed = True
+            store = getattr(self, "interaction_store", None)
+            if store is not None and hasattr(store, "close"):
+                try:
+                    store.close()
+                except Exception:
+                    pass
 
     def __enter__(self) -> "BrainLoop":
         return self

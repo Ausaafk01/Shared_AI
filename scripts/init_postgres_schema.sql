@@ -162,7 +162,7 @@ CREATE INDEX IF NOT EXISTS idx_graph_rel_target ON graph_relationships(project_i
 CREATE INDEX IF NOT EXISTS idx_graph_rel_type ON graph_relationships(project_id, relation_type);
 
 -- ============================================================================
--- 8. Memory Vectors (384-Dimensional Embeddings)
+-- 8. Memory Vectors (384, 768, and 1536-Dimensional Embeddings)
 -- ============================================================================
 DO $$
 BEGIN
@@ -171,22 +171,100 @@ BEGIN
             vector_id VARCHAR(64) PRIMARY KEY,
             project_id VARCHAR(64) NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
             memory_id VARCHAR(64) NOT NULL REFERENCES memories(memory_id) ON DELETE CASCADE,
+            version INT NOT NULL DEFAULT 1,
             embedding vector(384),
             model_name VARCHAR(128) NOT NULL DEFAULT 'all-MiniLM-L6-v2',
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            content TEXT NOT NULL DEFAULT '',
+            status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT uq_mem_vec_384 UNIQUE (project_id, memory_id, version, model_name)
         );
         CREATE INDEX IF NOT EXISTS idx_memory_vectors_384_lookup ON memory_vectors_384(project_id, memory_id);
+        CREATE INDEX IF NOT EXISTS idx_memory_vectors_384_status ON memory_vectors_384(project_id, status);
         CREATE INDEX IF NOT EXISTS idx_memory_vectors_384_hnsw ON memory_vectors_384 USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+
+        CREATE TABLE IF NOT EXISTS memory_vectors_768 (
+            vector_id VARCHAR(64) PRIMARY KEY,
+            project_id VARCHAR(64) NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+            memory_id VARCHAR(64) NOT NULL REFERENCES memories(memory_id) ON DELETE CASCADE,
+            version INT NOT NULL DEFAULT 1,
+            embedding vector(768),
+            model_name VARCHAR(128) NOT NULL DEFAULT 'text-embedding-gecko',
+            content TEXT NOT NULL DEFAULT '',
+            status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT uq_mem_vec_768 UNIQUE (project_id, memory_id, version, model_name)
+        );
+        CREATE INDEX IF NOT EXISTS idx_memory_vectors_768_lookup ON memory_vectors_768(project_id, memory_id);
+        CREATE INDEX IF NOT EXISTS idx_memory_vectors_768_status ON memory_vectors_768(project_id, status);
+        CREATE INDEX IF NOT EXISTS idx_memory_vectors_768_hnsw ON memory_vectors_768 USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+
+        CREATE TABLE IF NOT EXISTS memory_vectors_1536 (
+            vector_id VARCHAR(64) PRIMARY KEY,
+            project_id VARCHAR(64) NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+            memory_id VARCHAR(64) NOT NULL REFERENCES memories(memory_id) ON DELETE CASCADE,
+            version INT NOT NULL DEFAULT 1,
+            embedding vector(1536),
+            model_name VARCHAR(128) NOT NULL DEFAULT 'text-embedding-3-small',
+            content TEXT NOT NULL DEFAULT '',
+            status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT uq_mem_vec_1536 UNIQUE (project_id, memory_id, version, model_name)
+        );
+        CREATE INDEX IF NOT EXISTS idx_memory_vectors_1536_lookup ON memory_vectors_1536(project_id, memory_id);
+        CREATE INDEX IF NOT EXISTS idx_memory_vectors_1536_status ON memory_vectors_1536(project_id, status);
+        CREATE INDEX IF NOT EXISTS idx_memory_vectors_1536_hnsw ON memory_vectors_1536 USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
     ELSE
         CREATE TABLE IF NOT EXISTS memory_vectors_384 (
             vector_id VARCHAR(64) PRIMARY KEY,
             project_id VARCHAR(64) NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
             memory_id VARCHAR(64) NOT NULL REFERENCES memories(memory_id) ON DELETE CASCADE,
+            version INT NOT NULL DEFAULT 1,
             embedding REAL[],
             model_name VARCHAR(128) NOT NULL DEFAULT 'all-MiniLM-L6-v2',
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            content TEXT NOT NULL DEFAULT '',
+            status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT uq_mem_vec_384 UNIQUE (project_id, memory_id, version, model_name)
         );
         CREATE INDEX IF NOT EXISTS idx_memory_vectors_384_lookup ON memory_vectors_384(project_id, memory_id);
+        CREATE INDEX IF NOT EXISTS idx_memory_vectors_384_status ON memory_vectors_384(project_id, status);
+
+        CREATE TABLE IF NOT EXISTS memory_vectors_768 (
+            vector_id VARCHAR(64) PRIMARY KEY,
+            project_id VARCHAR(64) NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+            memory_id VARCHAR(64) NOT NULL REFERENCES memories(memory_id) ON DELETE CASCADE,
+            version INT NOT NULL DEFAULT 1,
+            embedding REAL[],
+            model_name VARCHAR(128) NOT NULL DEFAULT 'text-embedding-gecko',
+            content TEXT NOT NULL DEFAULT '',
+            status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT uq_mem_vec_768 UNIQUE (project_id, memory_id, version, model_name)
+        );
+        CREATE INDEX IF NOT EXISTS idx_memory_vectors_768_lookup ON memory_vectors_768(project_id, memory_id);
+        CREATE INDEX IF NOT EXISTS idx_memory_vectors_768_status ON memory_vectors_768(project_id, status);
+
+        CREATE TABLE IF NOT EXISTS memory_vectors_1536 (
+            vector_id VARCHAR(64) PRIMARY KEY,
+            project_id VARCHAR(64) NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+            memory_id VARCHAR(64) NOT NULL REFERENCES memories(memory_id) ON DELETE CASCADE,
+            version INT NOT NULL DEFAULT 1,
+            embedding REAL[],
+            model_name VARCHAR(128) NOT NULL DEFAULT 'text-embedding-3-small',
+            content TEXT NOT NULL DEFAULT '',
+            status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT uq_mem_vec_1536 UNIQUE (project_id, memory_id, version, model_name)
+        );
+        CREATE INDEX IF NOT EXISTS idx_memory_vectors_1536_lookup ON memory_vectors_1536(project_id, memory_id);
+        CREATE INDEX IF NOT EXISTS idx_memory_vectors_1536_status ON memory_vectors_1536(project_id, status);
     END IF;
 END $$;
 
@@ -345,6 +423,20 @@ ALTER TABLE memory_vectors_384 ENABLE ROW LEVEL SECURITY;
 ALTER TABLE memory_vectors_384 FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS memory_vectors_384_tenant_isolation ON memory_vectors_384;
 CREATE POLICY memory_vectors_384_tenant_isolation ON memory_vectors_384
+    USING (project_id = NULLIF(current_setting('app.current_project_id', true), ''))
+    WITH CHECK (project_id = NULLIF(current_setting('app.current_project_id', true), ''));
+
+ALTER TABLE memory_vectors_768 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memory_vectors_768 FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memory_vectors_768_tenant_isolation ON memory_vectors_768;
+CREATE POLICY memory_vectors_768_tenant_isolation ON memory_vectors_768
+    USING (project_id = NULLIF(current_setting('app.current_project_id', true), ''))
+    WITH CHECK (project_id = NULLIF(current_setting('app.current_project_id', true), ''));
+
+ALTER TABLE memory_vectors_1536 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memory_vectors_1536 FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memory_vectors_1536_tenant_isolation ON memory_vectors_1536;
+CREATE POLICY memory_vectors_1536_tenant_isolation ON memory_vectors_1536
     USING (project_id = NULLIF(current_setting('app.current_project_id', true), ''))
     WITH CHECK (project_id = NULLIF(current_setting('app.current_project_id', true), ''));
 

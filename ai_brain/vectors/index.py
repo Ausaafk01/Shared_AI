@@ -122,7 +122,19 @@ class VectorIndex:
             else ["ACTIVE"]
         )
 
-        # 3. Retrieve candidates strictly within project boundary
+        # 3. Native vector similarity search (e.g. pgvector on PostgreSQL)
+        if hasattr(self.storage, "search_similarity"):
+            return self.storage.search_similarity(
+                query_vector=query_vec,
+                project_id=p_id,
+                top_k=top_k,
+                similarity_threshold=similarity_threshold,
+                allowed_statuses=effective_statuses,
+                model_id=self.model_id,
+                query_text=query_text,
+            )
+
+        # 4. Standard in-memory fallback: Retrieve candidates strictly within project boundary
         candidates = self.storage.get_vectors_by_project(
             p_id,
             model_id=self.model_id,

@@ -1,6 +1,6 @@
 # AI Brain — Phase 4 System Benchmarking & Comparative Evaluation Report
 
-**Generated**: 2026-11-04 19:58:37 UTC
+**Generated**: 2026-11-05 08:33:22 UTC
 
 **Total Scenarios Evaluated**: 30 realistic multi-session test scenarios (3 per category across 10 categories)
 
@@ -101,21 +101,23 @@ While the suite contains 30 scenarios, they are organized into **10 distinct sce
 
 ### Underlying Category-Level Paired Differences (Condition C minus Condition A)
 
-The table below exposes the ten category-level cluster means and paired differences ($D_k = C_k - A_k$) directly used to compute the summary statistics:
+> [!NOTE]
+> **Precision Note on Displayed Category Vectors & Confidence Intervals**:
+> The category-level paired differences ($D_k = C_k - A_k$) are evaluated using unrounded, full-precision floating point arithmetic (e.g., $TASK\_CONTINUATION = 341.0 - 64.666667 = +276.333333...$). All reported summary statistics—Mean Difference ($\bar{D} = +371.8333$), Sample SD ($s = 319.9267$), Standard Error ($SE = 101.1697$), and 95% Confidence Interval ($[142.9875, 600.6792]$, presented rounded to two decimals as $[142.99, 600.68]$ using $t_{\text{crit}} = 2.262$ at $df=9$)—are computed directly from these unrounded full-precision values rather than from rounded display strings. The table below exposes the underlying values with four decimal places of precision to guarantee exact mathematical reproducibility:
 
 | Category ($k$) | Task Success Diff | Partial Credit Diff | Token Overhead ($C - A$) | Explanations Diff ($C - A$) | Decisions Diff ($C - A$) |
 |---|---:|---:|---:|---:|---:|
 
-| **`TASK_CONTINUATION`** | +0.667 | +0.883 | +276.3 | -3.333 | +1.000 |
-| **`ARCHITECTURAL_DECISION`** | +1.000 | +1.000 | +361.0 | -4.333 | +1.333 |
-| **`TECHNICAL_CONSTRAINTS`** | +0.667 | +0.967 | +350.7 | -4.667 | +1.000 |
-| **`UPDATED_REQUIREMENTS`** | +1.000 | +1.000 | +210.0 | -4.333 | +1.000 |
-| **`CONTRADICTORY_CLAIMS`** | +0.333 | +0.392 | +239.0 | -0.333 | +0.000 |
-| **`AGENT_SWITCHING`** | +0.667 | +0.883 | +286.0 | -3.333 | +1.000 |
-| **`SESSION_INTERRUPTION`** | +0.000 | +0.200 | +157.3 | -0.667 | +0.000 |
-| **`REPEATED_EXPLANATION`** | +1.000 | +1.000 | +288.3 | -3.667 | +1.000 |
-| **`NEEDLE_IN_HAYSTACK`** | +0.667 | +0.842 | +1266.0 | -2.667 | +1.000 |
-| **`STALE_KNOWLEDGE_REJECTION`** | +1.000 | +1.000 | +283.7 | -4.000 | +1.000 |
+| **`TASK_CONTINUATION`** | +0.6667 | +0.8833 | +276.3333 | -3.3333 | +1.0000 |
+| **`ARCHITECTURAL_DECISION`** | +1.0000 | +1.0000 | +361.0000 | -4.3333 | +1.3333 |
+| **`TECHNICAL_CONSTRAINTS`** | +0.6667 | +0.9667 | +350.6667 | -4.6667 | +1.0000 |
+| **`UPDATED_REQUIREMENTS`** | +1.0000 | +1.0000 | +210.0000 | -4.3333 | +1.0000 |
+| **`CONTRADICTORY_CLAIMS`** | +0.3333 | +0.3917 | +239.0000 | -0.3333 | +0.0000 |
+| **`AGENT_SWITCHING`** | +0.6667 | +0.8833 | +286.0000 | -3.3333 | +1.0000 |
+| **`SESSION_INTERRUPTION`** | +0.0000 | +0.2000 | +157.3333 | -0.6667 | +0.0000 |
+| **`REPEATED_EXPLANATION`** | +1.0000 | +1.0000 | +288.3333 | -3.6667 | +1.0000 |
+| **`NEEDLE_IN_HAYSTACK`** | +0.6667 | +0.8417 | +1266.0000 | -2.6667 | +1.0000 |
+| **`STALE_KNOWLEDGE_REJECTION`** | +1.0000 | +1.0000 | +283.6667 | -4.0000 | +1.0000 |
 
 ### Category-Level Detailed Breakdown (10 Clusters)
 
@@ -254,7 +256,7 @@ Every scenario was audited and explicitly labeled according to ground truth:
 ### 1. Does AI Brain reduce total context consumption?
 - **Direct Answer**: **No for single isolated queries, but yes compared to unbounded raw event replay in long sessions.**
 - For a single query, Condition C consumes **437.8 estimated tokens** compared to **65.9 estimated tokens** for Cold Start (+564.0% context overhead).
-- **Token Cost Direction & Overhead**: The category-level token difference is **+371.83 tokens** ($C - A$). Subtraction direction is defined as Condition C minus Condition A. A positive difference indicates that AI Brain consumes more tokens than Cold Start. This constitutes **additional token overhead**, not a performance improvement.
+- **Token Cost Direction & Overhead**: The category-level token difference is **+371.83 tokens** ($C - A$). Subtraction direction is defined as Condition C minus Condition A. A positive difference indicates that AI Brain consumes more tokens than Cold Start. This constitutes **additional token overhead**, not a performance improvement. Summary statistics are derived from unrounded full-precision category differences (mean = +371.8333, SE = 101.1697, 95% CI = [142.9875, 600.6792], presented as [142.99, 600.68] with critical t = 2.262 at df = 9).
 - However, compared to Raw History (274.1 estimated tokens in early multi-turn sessions), Brain's budgeted context package bounds token growth, preventing transcript overflow as history expands.
 
 ### 2. Does it improve retrieval quality?

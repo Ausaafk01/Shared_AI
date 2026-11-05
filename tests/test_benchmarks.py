@@ -7,6 +7,7 @@ exact McNemar's test, cluster-aware category analysis, and corrected conflict co
 
 from datetime import datetime, timezone
 import json
+import math
 import os
 import tempfile
 import unittest
@@ -469,11 +470,24 @@ class TestBenchmarkSubsystem(unittest.TestCase):
         # 3. Tokens Consumed Overhead (Direction: C - A)
         cluster_tok = stats["cluster_tokens"]
         self.assertEqual(len(cluster_tok.category_differences), 10)
-        self.assertAlmostEqual(cluster_tok.cluster_mean_diff, 371.8333, places=2)
-        self.assertAlmostEqual(cluster_tok.cluster_std_error, 101.1697, places=2)
+        self.assertAlmostEqual(cluster_tok.cluster_mean_diff, 371.8333, places=4)
+        self.assertAlmostEqual(cluster_tok.cluster_std_error, 101.1697, places=4)
         self.assertAlmostEqual(cluster_tok.t_statistic, 3.675, places=2)
-        self.assertAlmostEqual(cluster_tok.confidence_interval_95[0], 142.9875, places=1)
-        self.assertAlmostEqual(cluster_tok.confidence_interval_95[1], 600.6792, places=1)
+        self.assertAlmostEqual(cluster_tok.confidence_interval_95[0], 142.9875, places=4)
+        self.assertAlmostEqual(cluster_tok.confidence_interval_95[1], 600.6792, places=4)
+
+        # Verify exact reproducibility directly from unrounded underlying category_differences
+        unrounded_diffs = cluster_tok.category_differences
+        calc_mean = sum(unrounded_diffs) / 10.0
+        calc_var = sum((d - calc_mean) ** 2 for d in unrounded_diffs) / 9.0
+        calc_s = math.sqrt(calc_var)
+        calc_se = calc_s / math.sqrt(10.0)
+        calc_ci = (calc_mean - 2.262 * calc_se, calc_mean + 2.262 * calc_se)
+        self.assertAlmostEqual(calc_mean, cluster_tok.cluster_mean_diff, places=6)
+        self.assertAlmostEqual(calc_s, 319.9267, places=4)
+        self.assertAlmostEqual(calc_se, cluster_tok.cluster_std_error, places=6)
+        self.assertAlmostEqual(calc_ci[0], cluster_tok.confidence_interval_95[0], places=6)
+        self.assertAlmostEqual(calc_ci[1], cluster_tok.confidence_interval_95[1], places=6)
 
         # 4. Repeated Explanations (Direction: C - A, negative indicates reduction)
         cluster_exp = stats["cluster_repeated_explanations"]

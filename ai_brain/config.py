@@ -129,6 +129,32 @@ def _parse_float(value: Optional[str], default: float) -> float:
         return default
 
 
+def load_env_file(file_path: Optional[str] = None) -> None:
+    """Load key-value pairs from an ignored .env or .env.test file into os.environ if not set."""
+    if file_path is None:
+        for candidate in (".env", ".env.local", ".env.test"):
+            if os.path.exists(candidate):
+                load_env_file(candidate)
+        return
+
+    if not os.path.isfile(file_path):
+        return
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip().strip("'\"")
+                if k and k not in os.environ:
+                    os.environ[k] = v
+    except Exception:
+        pass
+
+
 def load_config_from_env(env: Optional[Dict[str, str]] = None) -> AppConfig:
     """Load and validate configuration from environment variables or given dict.
 
@@ -143,6 +169,8 @@ def load_config_from_env(env: Optional[Dict[str, str]] = None) -> AppConfig:
     - AI_BRAIN_ENV / ENVIRONMENT: 'development', 'test', 'production'
     - AI_BRAIN_DEBUG: 'true'/'false'
     """
+    if env is None:
+        load_env_file()
     e = os.environ if env is None else env
 
     raw_backend = (e.get("AI_BRAIN_STORAGE_BACKEND") or e.get("STORAGE_BACKEND") or "sqlite").strip().lower()

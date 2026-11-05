@@ -95,7 +95,8 @@ def start_server() -> None:
 
 def create_test_databases_and_roles() -> None:
     psql = os.path.join(BIN_DIR, "psql.exe")
-    sql = """
+    app_pw = os.environ.get("TEST_POSTGRES_APP_PASSWORD", "test_app_user_secret")
+    sql = f"""
     -- Create test database if not exists
     SELECT 'CREATE DATABASE test_ai_brain'
     WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'test_ai_brain')\\gexec
@@ -104,7 +105,7 @@ def create_test_databases_and_roles() -> None:
     DO $$
     BEGIN
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'ai_brain_app_user') THEN
-            CREATE ROLE ai_brain_app_user WITH LOGIN PASSWORD 'app_secure_pw_123' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+            CREATE ROLE ai_brain_app_user WITH LOGIN PASSWORD '{app_pw}' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
         END IF;
     END $$;
 
@@ -142,3 +143,4 @@ if __name__ == "__main__":
         init_database()
         start_server()
         create_test_databases_and_roles()
+

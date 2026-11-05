@@ -23,12 +23,15 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 import psycopg
-from ai_brain.config import DatabaseConfig, StorageBackend
+from ai_brain.config import DatabaseConfig, StorageBackend, load_env_file
 from ai_brain.storage.database import (
     ConnectionUnavailableError,
     DatabaseConnectionManager,
     DriverNotInstalledError,
 )
+
+# Load local test environment variables if present
+load_env_file()
 
 ADMIN_PG_URL = os.environ.get(
     "TEST_POSTGRES_ADMIN_URL",
@@ -36,7 +39,7 @@ ADMIN_PG_URL = os.environ.get(
 )
 APP_PG_URL = os.environ.get(
     "TEST_POSTGRES_APP_URL",
-    "postgresql://ai_brain_app_user:app_secure_pw_123@127.0.0.1:5432/test_ai_brain",
+    f"postgresql://ai_brain_app_user:{os.environ.get('TEST_POSTGRES_APP_PASSWORD', '')}@127.0.0.1:5432/test_ai_brain",
 )
 
 
@@ -112,15 +115,16 @@ class TestPostgresSchemaM51(unittest.TestCase):
         sql = _read_schema_sql()
         with cls.mgr.connection() as conn:
             with conn.cursor() as cur:
-                # Create role if missing
-                cur.execute("""
+                # Create role if missing with secure dynamic password
+                app_pw = os.environ.get("TEST_POSTGRES_APP_PASSWORD", "test_app_user_secret")
+                cur.execute(psycopg.sql.SQL("""
                 DO $$
                 BEGIN
                     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'ai_brain_app_user') THEN
-                        CREATE ROLE ai_brain_app_user WITH LOGIN PASSWORD 'app_secure_pw_123' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+                        CREATE ROLE ai_brain_app_user WITH LOGIN PASSWORD {} NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
                     END IF;
                 END $$;
-                """)
+                """).format(psycopg.sql.Literal(app_pw)))
                 cur.execute(sql)
                 cur.execute("GRANT ALL ON ALL TABLES IN SCHEMA public TO ai_brain_app_user;")
                 cur.execute("GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ai_brain_app_user;")

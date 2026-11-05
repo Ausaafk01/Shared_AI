@@ -15,6 +15,7 @@ from ai_brain.storage.database import DatabaseConnectionManager, get_database_ma
 from ai_brain.vectors.exceptions import (
     DimensionMismatchError,
     DuplicateVectorError,
+    PgvectorUnavailableError,
     ProjectIsolationError,
     VectorNotFoundError,
     VectorStorageError,
@@ -81,9 +82,16 @@ class PostgreSQLVectorStore(VectorStore):
         self,
         db_manager: Optional[DatabaseConnectionManager] = None,
         default_project_id: Optional[str] = None,
+        *,
+        allow_in_memory_fallback: bool = False,
+        hnsw_ef_search: int = 40,
+        hnsw_iterative_scan: str = "relaxed_order",
     ) -> None:
         self.db = db_manager or get_database_manager()
         self.default_project_id = default_project_id
+        self.allow_in_memory_fallback = allow_in_memory_fallback
+        self.hnsw_ef_search = hnsw_ef_search
+        self.hnsw_iterative_scan = hnsw_iterative_scan
         self._closed = False
         self._known_projects: set[str] = set()
         if default_project_id:
@@ -100,6 +108,17 @@ class PostgreSQLVectorStore(VectorStore):
                 cur.execute("SELECT 1 FROM pg_extension WHERE extname = 'vector';")
                 self._has_vector_ext = bool(cur.fetchone())
         return self._has_vector_ext
+
+    def _require_pgvector_or_raise(self) -> None:
+        """Verify pgvector extension is present; fail actionable unless in-memory fallback is explicitly enabled."""
+        if not self.has_pgvector():
+            if not self.allow_in_memory_fallback:
+                raise PgvectorUnavailableError(
+                    "The PostgreSQL 'vector' extension is not installed or enabled in database. "
+                    "Install pgvector or run 'CREATE EXTENSION IF NOT EXISTS vector;' in PostgreSQL. "
+                    "Silent fallback to in-memory computation is disabled by default; pass "
+                    "allow_in_memory_fallback=True only for explicit local/development override."
+                )
 
     def _ensure_open(self) -> None:
         if self._closed:
@@ -163,6 +182,7 @@ class PostgreSQLVectorStore(VectorStore):
     def add_vector(self, record: VectorRecord, *, fail_if_exists: bool = False) -> VectorRecord:
         """Store a VectorRecord with strict dimension and constraint validation."""
         self._ensure_open()
+        self._require_pgvector_or_raise()
         if not isinstance(record, VectorRecord):
             raise VectorValidationError(f"Expected VectorRecord, got {type(record).__name__}")
 
@@ -463,6 +483,11 @@ class PostgreSQLVectorStore(VectorStore):
         with self.db.tenant_context(proj) as conn:
             with conn.cursor() as cur:
                 if self.has_pgvector():
+                    # Configure HNSW search parameters in PostgreSQL session
+                    cur.execute("SELECT set_config('hnsw.ef_search', %s, true);", (str(self.hnsw_ef_search),))
+                    if self.hnsw_iterative_scan in ("off", "relaxed_order", "strict_order"):
+                        cur.execute("SELECT set_config('hnsw.iterative_scan', %s, true);", (self.hnsw_iterative_scan,))
+
                     # Native pgvector HNSW-accelerated similarity search
                     sql = f"""
                         SELECT vector_id, memory_id, project_id, version,
@@ -519,6 +544,36 @@ class PostgreSQLVectorStore(VectorStore):
                     count_row = cur.fetchone()
                     total_candidates = int(count_row[0]) if count_row else len(matches)
 
+                    # Controlled exact scan fallback if approximate HNSW returned fewer than requested top_k
+                    # but eligible matching candidates exist within this tenant boundary
+                    target_k = min(top_k, total_candidates) if top_k > 0 else total_candidates
+                    if similarity_threshold is None and len(matches) < target_k:
+                        logger.debug(
+                            "HNSW approximate search returned %d items, but tenant has %d candidates. "
+                            "Executing controlled exact scan fallback to guarantee completeness.",
+                            len(matches),
+                            total_candidates,
+                        )
+                        cur.execute("SET LOCAL enable_indexscan = off;")
+                        cur.execute(sql, params)
+                        rows = cur.fetchall()
+                        matches = []
+                        for r in rows:
+                            v_id, m_id, p_id, ver, stat, cont, mod_name, meta_raw, sim = r
+                            meta = meta_raw if isinstance(meta_raw, dict) else json.loads(meta_raw or "{}")
+                            matches.append(
+                                VectorMatch(
+                                    memory_id=m_id,
+                                    score=float(sim),
+                                    project_id=p_id,
+                                    version=ver,
+                                    status=stat,
+                                    content=cont,
+                                    model_id=mod_name,
+                                    metadata=meta,
+                                )
+                            )
+
                     return VectorSearchResult(
                         query=query_text or f"<vector:{dim}d>",
                         matches=tuple(matches),
@@ -527,7 +582,18 @@ class PostgreSQLVectorStore(VectorStore):
                         total_candidates=total_candidates,
                     )
                 else:
-                    # Fallback for systems without pgvector extension
+                    # Require explicit opt-in for in-memory fallback
+                    if not self.allow_in_memory_fallback:
+                        raise PgvectorUnavailableError(
+                            "The PostgreSQL 'vector' extension is not installed or enabled in database. "
+                            "Install pgvector or run 'CREATE EXTENSION IF NOT EXISTS vector;' in PostgreSQL. "
+                            "Silent fallback to in-memory computation is disabled by default; pass "
+                            "allow_in_memory_fallback=True only for explicit local/development override."
+                        )
+
+                    logger.warning(
+                        "PostgreSQL pgvector extension unavailable; executing explicitly allowed in-memory vector search fallback."
+                    )
                     candidates = self.get_vectors_by_project(
                         proj, model_id=model_id, allowed_statuses=statuses
                     )
@@ -588,3 +654,4 @@ class PostgreSQLVectorStore(VectorStore):
     def close(self) -> None:
         """Release storage resources (idempotent)."""
         self._closed = True
+

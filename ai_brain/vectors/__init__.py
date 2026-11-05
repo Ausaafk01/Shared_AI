@@ -11,6 +11,7 @@ from .exceptions import (
     VectorError,
     VectorNotFoundError,
     VectorStorageError,
+    PgvectorUnavailableError,
     VectorValidationError,
 )
 from .index import VectorIndex, compute_cosine_similarity
@@ -49,6 +50,7 @@ __all__ = [
     "VectorNotFoundError",
     "DuplicateVectorError",
     "VectorStorageError",
+    "PgvectorUnavailableError",
     "ProjectIsolationError",
 ]
 

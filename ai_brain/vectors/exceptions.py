@@ -35,6 +35,10 @@ class VectorStorageError(VectorError):
     """Raised when persistent vector storage operations fail."""
 
 
+class PgvectorUnavailableError(VectorStorageError):
+    """Raised when the PostgreSQL pgvector extension is required but not installed or enabled."""
+
+
 class ProjectIsolationError(VectorError):
     """Raised when vector operations attempt to violate project boundaries."""
 

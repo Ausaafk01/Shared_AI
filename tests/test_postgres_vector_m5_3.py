@@ -43,6 +43,7 @@ from ai_brain.storage.database import DatabaseConnectionManager
 from ai_brain.vectors.exceptions import (
     DimensionMismatchError,
     DuplicateVectorError,
+    PgvectorUnavailableError,
     ProjectIsolationError,
     VectorNotFoundError,
     VectorValidationError,
@@ -801,6 +802,110 @@ class TestPostgresVectorM53(unittest.TestCase):
         self.assertIsNotNone(res_hybrid.results[0].vector_score)
         self.assertEqual(res_hybrid.method, RetrievalMethod.HYBRID)
         self.assertIn("method", res_hybrid.to_dict())
+
+    # -------------------------------------------------------------------------
+    # 13. Missing pgvector Extension Handling & Explicit Opt-In Fallback
+    # -------------------------------------------------------------------------
+    def test_13_missing_pgvector_extension_error_and_explicit_opt_in_fallback(self) -> None:
+        """Verify missing pgvector extension raises PgvectorUnavailableError unless explicitly opted-in."""
+        # Case 1: Default behavior (allow_in_memory_fallback=False) raises PgvectorUnavailableError
+        store_strict = PostgreSQLVectorStore(self.app_db, allow_in_memory_fallback=False)
+        store_strict._has_vector_ext = False
+
+        vec = _make_dense_vector(384, seed=1.0)
+        rec = VectorRecord.create(
+            record_id=f"rec_nofallback_{uuid.uuid4().hex[:6]}",
+            project_id=self.project_id,
+            memory_id="mem_nofallback",
+            embedding=vec,
+            model_id="test-model",
+            content="test no fallback",
+        )
+
+        with self.assertRaises(PgvectorUnavailableError):
+            store_strict.add_vector(rec)
+
+        with self.assertRaises(PgvectorUnavailableError):
+            store_strict.search_similarity(query_vector=vec, project_id=self.project_id)
+
+        # Case 2: Explicit opt-in (allow_in_memory_fallback=True) allows in-memory calculation
+        store_fallback = PostgreSQLVectorStore(self.app_db, allow_in_memory_fallback=True)
+        store_fallback._has_vector_ext = False
+
+        # Add record with live store so record exists in table
+        store_live = PostgreSQLVectorStore(self.app_db)
+        store_live.add_vector(rec)
+
+        # Searching with store_fallback executes in-memory fallback successfully
+        fallback_res = store_fallback.search_similarity(query_vector=vec, project_id=self.project_id)
+        self.assertGreater(len(fallback_res.matches), 0)
+        self.assertEqual(fallback_res.matches[0].memory_id, "mem_nofallback")
+
+    # -------------------------------------------------------------------------
+    # 14. HNSW Search Under Multi-Tenant Isolation with Distractor Projects
+    # -------------------------------------------------------------------------
+    def test_14_hnsw_search_under_tenant_isolation_with_distractor_projects(self) -> None:
+        """Verify HNSW search under multi-tenant isolation returns complete top_k without cross-tenant leakage."""
+        target_project = f"proj_target_{uuid.uuid4().hex[:6]}"
+        distractor_project = f"proj_dist_{uuid.uuid4().hex[:6]}"
+        store = PostgreSQLVectorStore(self.app_db, default_project_id=target_project)
+
+        # Base query vector
+        query_vec = [1.0] + [0.0] * 383
+
+        # Add 30 distractor records in distractor_project that are extremely close to query_vec
+        for i in range(30):
+            d_vec = [0.999] + [0.0] * 383
+            d_vec[1] = 0.001 * (i + 1)
+            norm = math.sqrt(sum(x * x for x in d_vec))
+            d_vec = [x / norm for x in d_vec]
+            store.add_vector(
+                VectorRecord.create(
+                    record_id=f"rec_dist_{i}_{uuid.uuid4().hex[:6]}",
+                    project_id=distractor_project,
+                    memory_id=f"mem_dist_{i}",
+                    embedding=d_vec,
+                    model_id="eval-model",
+                    content=f"Distractor content {i}",
+                )
+            )
+
+        # Add 10 records in target_project that are slightly further
+        for i in range(10):
+            t_vec = [0.95] + [0.0] * 383
+            t_vec[2] = 0.01 * (i + 1)
+            norm = math.sqrt(sum(x * x for x in t_vec))
+            t_vec = [x / norm for x in t_vec]
+            store.add_vector(
+                VectorRecord.create(
+                    record_id=f"rec_tgt_{i}_{uuid.uuid4().hex[:6]}",
+                    project_id=target_project,
+                    memory_id=f"mem_tgt_{i}",
+                    embedding=t_vec,
+                    model_id="eval-model",
+                    content=f"Target content {i}",
+                )
+            )
+
+        # Execute search under target_project with top_k = 10
+        res = store.search_similarity(
+            query_vector=query_vec,
+            project_id=target_project,
+            top_k=10,
+        )
+
+        # 1. Exactly 10 results returned (no loss of candidates due to project filtering)
+        self.assertEqual(len(res.matches), 10, "Target project search must return all 10 eligible candidates")
+
+        # 2. Every single result strictly belongs to target_project
+        for m in res.matches:
+            self.assertEqual(m.project_id, target_project)
+            self.assertTrue(m.memory_id.startswith("mem_tgt_"))
+
+        # 3. Distractor records are completely absent
+        retrieved_ids = {m.memory_id for m in res.matches}
+        for i in range(30):
+            self.assertNotIn(f"mem_dist_{i}", retrieved_ids)
 
 
 if __name__ == "__main__":

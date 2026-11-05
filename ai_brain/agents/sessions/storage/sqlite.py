@@ -187,3 +187,15 @@ class SQLiteSessionStore(SessionStore):
                     pass
                 self._closed = True
 
+    def __enter__(self) -> "SQLiteSessionStore":
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
+

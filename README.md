@@ -792,7 +792,7 @@ print(f"Claude Output: {claude_res.content}")
 
 ## Running Automated Tests
 
-Run all 328 automated tests across the Event System, Memory Model, Memory Extraction, Memory Updating, Conflict Management, Knowledge Graph, Vector Memory, Retrieval Engine, Context Builder, Brain Loop, Multi-Agent System, Machine Learning Layer, and Benchmarking Framework:
+Run all 338 collected automated tests (334 passing, 4 live provider tests skipped offline) across the Event System, Memory Model, Memory Extraction, Memory Updating, Conflict Management, Knowledge Graph, Vector Memory, Retrieval Engine, Context Builder, Brain Loop, Multi-Agent System, Machine Learning Layer, Benchmarking Framework, and Storage Lifecycle:
 
 ```bash
 python -m unittest discover -s tests -v
@@ -882,4 +882,31 @@ python scripts/run_benchmarks.py
 - [x] **Reconciled Avoided Explanations Formula**: Strict scenario-level arithmetic directly summing to 94 across all 10 categories ($105$ required in A vs $11$ in C = $94$ avoided, 89.52% reduction), ensuring omitted or unretrieved facts increase Condition C's needed explanations and never count as avoided.
 - [x] **Cluster-Stratified Analysis & Exact Student's t Statistical Qualification**: Paired exact McNemar's tests on binary task success (A vs B: $p < 0.001$, A vs C: $p < 0.001$, B vs C: $p = 0.3877$), paired Student's t-tests, and cluster-stratified category analysis ($K=10$ clusters, $df=9$) reporting cluster standard errors ($SE = 0.104822$), cluster $t$-statistics ($t = 6.6780$), numerically evaluated two-tailed Student's t $p$-values ($p = 9.0787 \times 10^{-5}$ via composite Simpson's rule numerical integration), and full-precision 95% confidence intervals using the exact Student's t critical value ($t_{\text{crit}} = 2.262157162798205$ at $df=9$, e.g. Task Success $[+0.462876, +0.937124]$ and Token Overhead $[142.9715875613, 600.6950791054]$, presented as $[142.9716, 600.6951]$ and rounded to two decimals as $[142.97, 600.70]$ with numerically evaluated two-tailed Student's t $p$-value = $0.00511227$). Explicitly qualified as exploratory and conditional on treating categories as independent clusters; token difference ($+371.833333$ tokens, $C - A$) explicitly defined as additional token overhead rather than performance improvement. Summary statistics and regression tests verify exact mathematical agreement across all five metrics.
 - [x] **Automated Reporting Framework & Full Precision Storage**: Machine-readable JSON (`benchmarks_report.json`) and Markdown (`benchmarks_report.md`) exports displaying at least four decimal places for all category differences, preferring six decimal places for repeating fractions, and storing unrounded full-precision IEEE-754 floats in JSON. Displayed vectors reproduce reported means, standard deviations, standard errors, t-statistics, and full-precision 95% confidence intervals within $< 10^{-6}$ tolerance.
-- [x] **Full Regression Verification**: All 316 prior tests preserved + 20 benchmark tests = 336 tests collected: 332 passed, 4 live provider tests skipped. All 8 demonstrations working offline.
+- [x] **Full Regression Verification**: All 316 prior tests preserved + 20 benchmark tests + 2 storage/loop lifecycle tests = 338 tests collected: 334 passed, 4 live provider tests skipped. All 8 demonstrations working offline.
+
+### Comprehensive Audit & Error Correction Summary (Phases 1–4)
+- [x] **SQLite Resource Leakage Elimination**: Implemented `__del__` safety finalizers and context manager support (`__enter__` / `__exit__`) across all 6 persistent storage classes (`SQLiteEventStore`, `SQLiteInteractionStore`, `SQLiteVectorStore`, `SQLiteAgentRegistryStore`, `SQLiteSessionStore`, `SQLiteFeedbackStore`). Prevents unclosed connection warnings and file descriptor exhaustion upon object garbage collection.
+- [x] **Brain Loop Resource Lifecycle Management**: Added `__del__`, `__enter__`, and `__exit__` support to `BrainLoop`, ensuring owned SQLite interaction stores are safely closed on destruction.
+- [x] **Benchmark Runner & Test Fixture Cleanup**: Fixed orphaned `BrainLoop` references in `BenchmarkRunner._run_ai_brain_condition` and unit tests in `tests/test_loop.py` to ensure explicit `.close()` invocation in execution `finally` blocks.
+- [x] **Storage Type Annotation & Defensive Guards**: Resolved missing `Any` import in `ai_brain/loop/storage/sqlite.py` and added idempotent closed-state guards in `SQLiteFeedbackStore.close()`.
+- [x] **Audited Zero-Leakage Test Execution**: Complete test suite passes with zero `ResourceWarning` emissions under Python 3.13 (`python -W error::ResourceWarning -m unittest discover -s tests -v`).
+
+### Phase 5: Production Backend, Distributed Persistence & Enterprise Infrastructure (Planned / Unimplemented)
+> **Status:** Architecture Designed & Prerequisites Established (Implementation Not Started).
+> **Implementation Scope:** REST/gRPC API service layer, production PostgreSQL persistence, enterprise Auth/RBAC, multi-tenant concurrency, background job workers, production vector database integration, OpenTelemetry instrumentation, and horizontal containerized deployment.
+
+#### Prerequisites Completed in Phases 1–4:
+1. **Deterministic Core Invariants**: Engine-level append-only events, immutable version chains, deterministic token budgets, and strict project tenant isolation verified.
+2. **Abstract Storage Interfaces**: Abstract base classes defined for `EventStore`, `VectorStore`, `AgentRegistryStore`, `SessionStore`, `InteractionStore`, and `FeedbackStore`, allowing drop-in production adapters.
+3. **Decoupled Agent Transports**: Unified provider adapters with complete credential isolation and payload schema compliance across OpenAI, Anthropic, Gemini, and Antigravity.
+4. **Offline Benchmarking Baseline**: Authoritative 30-scenario benchmark suite with exact statistical tests and verified token accounting.
+
+#### Phase 5 Target Architecture & Technical Requirements:
+- [ ] **API Service Layer**: FastAPI/Uvicorn asynchronous REST API and optional gRPC endpoints for low-latency agent interaction streams, context assembly, and event ingestion.
+- [ ] **Distributed Database Persistence**: Migration from embedded SQLite to production PostgreSQL 16+ with TimescaleDB extension for high-throughput append-only event streams, connection pooling (PgBouncer), and partitioned tables.
+- [ ] **Enterprise Authentication & RBAC**: JWT/OIDC authentication middleware, tenant cryptographic boundaries, role-based access control (Admin, Agent, Auditor, Read-Only), and automated secret redaction.
+- [ ] **Multi-Agent Shared Concurrency**: Distributed locking (Redis Redlock) and optimistic concurrency control for concurrent agent sessions interacting with shared project knowledge graphs.
+- [ ] **Asynchronous Background Workers**: Distributed task queues (Celery/Temporal with Redis/RabbitMQ) for asynchronous memory extraction, offline graph re-indexing, ML reranking model retraining, and archival compaction.
+- [ ] **Production Vector Database**: Scalable vector search integration (pgvector or Qdrant cluster) replacing in-memory SQLite cosine similarity, supporting filtered HNSW indexing and distributed shards.
+- [ ] **Telemetry, Observability & Tracing**: Structured JSON logging, Prometheus metrics (retrieval latency, token utilization, cache hit ratios), and OpenTelemetry distributed tracing across agent handoffs.
+- [ ] **Horizontal Deployment & Resilience**: Docker containerization, Kubernetes Helm charts, health/readiness probes, graceful shutdown hooks, and zero-downtime database schema migrations via Alembic.

@@ -3,12 +3,16 @@ Automated tests for persistent event storage, retrieval, ordering, filtering, an
 """
 
 from datetime import datetime, timezone, timedelta
+import gc
 import os
 from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+import warnings
 
+from ai_brain.agents.registry.sqlite import SQLiteAgentRegistryStore
+from ai_brain.agents.sessions.storage.sqlite import SQLiteSessionStore
 from ai_brain.events.exceptions import (
     DuplicateEventError,
     StorageCorruptionError,
@@ -17,6 +21,9 @@ from ai_brain.events.exceptions import (
 from ai_brain.events.models import Event
 from ai_brain.events.storage.sqlite import SQLiteEventStore
 from ai_brain.events.types import EventType
+from ai_brain.loop.storage.sqlite import SQLiteInteractionStore
+from ai_brain.ml.feedback.store import SQLiteFeedbackStore
+from ai_brain.vectors.storage.sqlite import SQLiteVectorStore
 
 
 class TestSQLiteEventStore(unittest.TestCase):
@@ -327,6 +334,36 @@ class TestSQLiteEventStore(unittest.TestCase):
             self.assertEqual(events[0].event_id, "valid-id")
         finally:
             tolerant_store.close()
+
+
+class TestSQLiteResourceManagementAndLifecycle(unittest.TestCase):
+    """Regression tests verifying context managers and GC connection cleanup without ResourceWarning."""
+
+    def test_sqlite_stores_context_manager_and_gc_cleanup(self) -> None:
+        """Verify context manager and finalizer close connections without leaking or warning."""
+        store_factories = [
+            lambda: SQLiteEventStore(":memory:"),
+            lambda: SQLiteInteractionStore(":memory:"),
+            lambda: SQLiteVectorStore(":memory:"),
+            lambda: SQLiteAgentRegistryStore(":memory:"),
+            lambda: SQLiteSessionStore(":memory:"),
+            lambda: SQLiteFeedbackStore(":memory:"),
+        ]
+
+        for factory in store_factories:
+            # 1. Test context manager closes store
+            with factory() as store:
+                self.assertFalse(store._closed)
+            self.assertTrue(store._closed)
+
+            # 2. Test GC deallocation does not emit ResourceWarning
+            with warnings.catch_warnings(record=True) as captured:
+                warnings.simplefilter("always", ResourceWarning)
+                unreferenced_store = factory()
+                del unreferenced_store
+                gc.collect()
+                res_warns = [w for w in captured if issubclass(w.category, ResourceWarning)]
+                self.assertEqual(len(res_warns), 0, f"ResourceWarning emitted during GC for {factory}")
 
 
 if __name__ == "__main__":

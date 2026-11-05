@@ -845,6 +845,7 @@ class BenchmarkRunner:
         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
 
         try:
+            loop.close()
             ev_store.close()
             vec_store.close()
         except Exception:

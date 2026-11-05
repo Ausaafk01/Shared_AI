@@ -3,10 +3,12 @@ Comprehensive test suite for the Brain Loop subsystem.
 """
 
 from datetime import datetime, timezone
+import gc
 import os
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
+import warnings
 
 from ai_brain.context import ContextBuilder, DeterministicTokenizer
 from ai_brain.events import SQLiteEventStore
@@ -652,15 +654,18 @@ class TestBrainLoop(unittest.TestCase):
             event_store=self.event_store,
             retrieval_engine=bad_engine,
         )
-        with self.assertRaises(RetrievalStageError):
-            loop_bad_retrieval.prepare_context(
-                AgentInteractionInput(
-                    project_id="proj-alpha",
-                    agent_id="agent-claude",
-                    session_id="sess-01",
-                    content="Query",
+        try:
+            with self.assertRaises(RetrievalStageError):
+                loop_bad_retrieval.prepare_context(
+                    AgentInteractionInput(
+                        project_id="proj-alpha",
+                        agent_id="agent-claude",
+                        session_id="sess-01",
+                        content="Query",
+                    )
                 )
-            )
+        finally:
+            loop_bad_retrieval.close()
 
         # B: Context building failure
         bad_builder = MagicMock()
@@ -669,15 +674,18 @@ class TestBrainLoop(unittest.TestCase):
             event_store=self.event_store,
             context_builder=bad_builder,
         )
-        with self.assertRaises(ContextStageError):
-            loop_bad_context.prepare_context(
-                AgentInteractionInput(
-                    project_id="proj-alpha",
-                    agent_id="agent-claude",
-                    session_id="sess-01",
-                    content="Query",
+        try:
+            with self.assertRaises(ContextStageError):
+                loop_bad_context.prepare_context(
+                    AgentInteractionInput(
+                        project_id="proj-alpha",
+                        agent_id="agent-claude",
+                        session_id="sess-01",
+                        content="Query",
+                    )
                 )
-            )
+        finally:
+            loop_bad_context.close()
 
     # 22. Partial failure reporting
     def test_22_partial_failure_reporting(self) -> None:
@@ -689,26 +697,29 @@ class TestBrainLoop(unittest.TestCase):
             event_store=self.event_store,
             graph_integrator=bad_integrator,
         )
-        inp = AgentInteractionInput(
-            interaction_id="int-part-1",
-            project_id="proj-alpha",
-            agent_id="agent-claude",
-            session_id="sess-01",
-            content="Setup tech",
-        )
-        loop_partial.prepare_context(inp)
+        try:
+            inp = AgentInteractionInput(
+                interaction_id="int-part-1",
+                project_id="proj-alpha",
+                agent_id="agent-claude",
+                session_id="sess-01",
+                content="Setup tech",
+            )
+            loop_partial.prepare_context(inp)
 
-        resp = AgentResponseInput(
-            interaction_id="int-part-1",
-            project_id="proj-alpha",
-            agent_id="agent-claude",
-            session_id="sess-01",
-            content="The project uses PostgreSQL as its database.",
-        )
-        comp = loop_partial.complete_interaction(resp)
-        self.assertEqual(comp.status, InteractionStatus.PARTIAL_SUCCESS)
-        self.assertTrue(comp.is_partial_success)
-        self.assertGreater(len(comp.warnings), 0)
+            resp = AgentResponseInput(
+                interaction_id="int-part-1",
+                project_id="proj-alpha",
+                agent_id="agent-claude",
+                session_id="sess-01",
+                content="The project uses PostgreSQL as its database.",
+            )
+            comp = loop_partial.complete_interaction(resp)
+            self.assertEqual(comp.status, InteractionStatus.PARTIAL_SUCCESS)
+            self.assertTrue(comp.is_partial_success)
+            self.assertGreater(len(comp.warnings), 0)
+        finally:
+            loop_partial.close()
 
     # 23. Retry and idempotency behavior
     def test_23_retry_and_idempotency_behavior(self) -> None:
@@ -778,6 +789,25 @@ class TestBrainLoop(unittest.TestCase):
         ev = self.event_store.get_event_by_id(comp.response_event_id)
         with self.assertRaises(Exception):
             ev.output = {"content": "Mutated"}
+
+    # 26. Context manager and GC resource cleanup
+    def test_26_context_manager_and_gc_cleanup(self) -> None:
+        """Verify BrainLoop context manager and finalizer close interaction stores cleanly."""
+        ev_store = SQLiteEventStore(":memory:")
+        try:
+            with BrainLoop(event_store=ev_store) as loop:
+                self.assertFalse(loop.interaction_store._closed)
+            self.assertTrue(loop.interaction_store._closed)
+
+            with warnings.catch_warnings(record=True) as captured:
+                warnings.simplefilter("always", ResourceWarning)
+                unreferenced_loop = BrainLoop(event_store=ev_store)
+                del unreferenced_loop
+                gc.collect()
+                res_warns = [w for w in captured if issubclass(w.category, ResourceWarning)]
+                self.assertEqual(len(res_warns), 0)
+        finally:
+            ev_store.close()
 
 
 class TestBrainLoopReviewAndRecovery(unittest.TestCase):

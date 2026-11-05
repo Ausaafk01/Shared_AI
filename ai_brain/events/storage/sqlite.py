@@ -434,6 +434,12 @@ class SQLiteEventStore(EventStore):
                 finally:
                     self._closed = True
 
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
+
     def __enter__(self) -> "SQLiteEventStore":
         return self
 

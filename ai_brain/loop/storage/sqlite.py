@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 import sqlite3
 import threading
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 
 from ai_brain.loop.exceptions import BrainLoopError
 from ai_brain.loop.models import InteractionRecord, InteractionStatus
@@ -220,4 +220,16 @@ class SQLiteInteractionStore(InteractionStore):
                 except sqlite3.Error:
                     pass
                 self._closed = True
+
+    def __enter__(self) -> "SQLiteInteractionStore":
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
 

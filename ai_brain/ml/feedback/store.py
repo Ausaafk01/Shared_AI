@@ -39,6 +39,7 @@ class SQLiteFeedbackStore(FeedbackStore):
 
     def __init__(self, db_path: str = ":memory:") -> None:
         self.db_path = db_path
+        self._closed = False
         self._conn = sqlite3.connect(db_path)
         self._conn.row_factory = sqlite3.Row
         self._init_db()
@@ -146,4 +147,21 @@ class SQLiteFeedbackStore(FeedbackStore):
         return results
 
     def close(self) -> None:
-        self._conn.close()
+        if not getattr(self, "_closed", False):
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            self._closed = True
+
+    def __enter__(self) -> "SQLiteFeedbackStore":
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass

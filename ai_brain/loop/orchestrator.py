@@ -161,7 +161,22 @@ class BrainLoop:
     def close(self) -> None:
         """Close storage connections."""
         if hasattr(self.interaction_store, "close"):
-            self.interaction_store.close()
+            try:
+                self.interaction_store.close()
+            except Exception:
+                pass
+
+    def __enter__(self) -> "BrainLoop":
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def get_interaction(self, interaction_id: str) -> Optional[InteractionRecord]:
         """Look up an interaction record by ID from persistent storage."""

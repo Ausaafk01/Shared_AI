@@ -219,3 +219,4 @@ def get_config(reload: bool = False) -> AppConfig:
     if _GLOBAL_CONFIG is None or reload:
         _GLOBAL_CONFIG = load_config_from_env()
     return _GLOBAL_CONFIG
+

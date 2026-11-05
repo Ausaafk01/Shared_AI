@@ -93,6 +93,8 @@ class DatabaseConnectionManager:
         host = parsed.hostname or "localhost"
         port = parsed.port or 5432
 
+        connect_timeout = max(1, int(self.config.pool_timeout))
+
         try:
             if self._driver_name == "psycopg":
                 conn = self._driver.connect(
@@ -103,6 +105,7 @@ class DatabaseConnectionManager:
                     port=port,
                     autocommit=False,
                     application_name=self.config.application_name,
+                    connect_timeout=connect_timeout,
                 )
             else:  # psycopg2
                 conn = self._driver.connect(
@@ -112,6 +115,7 @@ class DatabaseConnectionManager:
                     host=host,
                     port=port,
                     application_name=self.config.application_name,
+                    connect_timeout=connect_timeout,
                 )
                 conn.autocommit = False
             return conn
@@ -332,3 +336,4 @@ def tenant_context(project_id: str, conn: Optional[Any] = None) -> Generator[Any
     mgr = get_database_manager()
     with mgr.tenant_context(project_id, conn=conn) as c:
         yield c
+

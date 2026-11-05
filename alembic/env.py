@@ -1,4 +1,4 @@
-"""Alembic environment configuration for AI Brain.
+"""Alembic environment configuration for AI Brain PostgreSQL migrations.
 
 Reads database URL from AI Brain configuration or environment variables,
 supporting both offline SQL generation and online execution.
@@ -31,10 +31,15 @@ target_url = (
     os.environ.get("TEST_POSTGRES_URL")
     or os.environ.get("DATABASE_URL")
     or os.environ.get("AI_BRAIN_DATABASE_URL")
-    or app_cfg.db.database_url
+    or (app_cfg.db.database_url if app_cfg.db.is_postgres else "postgresql+psycopg://postgres@127.0.0.1:5432/test_ai_brain")
 )
-if target_url and target_url.startswith("postgres://"):
-    target_url = target_url.replace("postgres://", "postgresql://", 1)
+
+# Normalize URL scheme for SQLAlchemy + psycopg
+if target_url:
+    if target_url.startswith("postgres://"):
+        target_url = target_url.replace("postgres://", "postgresql+psycopg://", 1)
+    elif target_url.startswith("postgresql://") and not target_url.startswith("postgresql+"):
+        target_url = target_url.replace("postgresql://", "postgresql+psycopg://", 1)
 
 config.set_main_option("sqlalchemy.url", target_url)
 

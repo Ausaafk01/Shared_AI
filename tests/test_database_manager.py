@@ -58,6 +58,7 @@ class TestDatabaseManager(unittest.TestCase):
         cfg = DatabaseConfig(
             backend=StorageBackend.POSTGRES,
             database_url="postgresql://invalid-user:badpass@127.0.0.1:54399/nonexistent",
+            pool_timeout=1.0,
         )
         mgr = DatabaseConnectionManager(cfg)
         if not mgr.driver_available:
@@ -79,3 +80,4 @@ class TestDatabaseManager(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -12,7 +12,7 @@ Creates authoritative 14-table schema:
 5. memories (versioned semantic/working records)
 6. graph_nodes
 7. graph_relationships
-8. memory_vectors_384 (pgvector HNSW cosine index)
+8. memory_vectors_384 (pgvector or REAL[] fallback)
 9. agents
 10. agent_credentials (hashed API keys & revocations)
 11. sessions
@@ -33,8 +33,17 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # 0. Vector extension (if available)
-    op.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+    # 0. Vector extension (if available on host)
+    op.execute("""
+    DO $$
+    BEGIN
+        BEGIN
+            CREATE EXTENSION IF NOT EXISTS vector;
+        EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'pgvector extension not installed on system; memory_vectors_384 will use REAL[] array type';
+        END;
+    END $$;
+    """)
 
     # 1. Projects
     op.execute("""
@@ -185,19 +194,29 @@ def upgrade() -> None:
 
     # 8. Memory Vectors 384
     op.execute("""
-    CREATE TABLE IF NOT EXISTS memory_vectors_384 (
-        vector_id VARCHAR(64) PRIMARY KEY,
-        project_id VARCHAR(64) NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
-        memory_id VARCHAR(64) NOT NULL REFERENCES memories(memory_id) ON DELETE CASCADE,
-        embedding vector(384),
-        model_name VARCHAR(128) NOT NULL DEFAULT 'all-MiniLM-L6-v2',
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-    CREATE INDEX IF NOT EXISTS idx_memory_vectors_384_lookup ON memory_vectors_384(project_id, memory_id);
     DO $$
     BEGIN
         IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
+            CREATE TABLE IF NOT EXISTS memory_vectors_384 (
+                vector_id VARCHAR(64) PRIMARY KEY,
+                project_id VARCHAR(64) NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+                memory_id VARCHAR(64) NOT NULL REFERENCES memories(memory_id) ON DELETE CASCADE,
+                embedding vector(384),
+                model_name VARCHAR(128) NOT NULL DEFAULT 'all-MiniLM-L6-v2',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_memory_vectors_384_lookup ON memory_vectors_384(project_id, memory_id);
             CREATE INDEX IF NOT EXISTS idx_memory_vectors_384_hnsw ON memory_vectors_384 USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+        ELSE
+            CREATE TABLE IF NOT EXISTS memory_vectors_384 (
+                vector_id VARCHAR(64) PRIMARY KEY,
+                project_id VARCHAR(64) NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+                memory_id VARCHAR(64) NOT NULL REFERENCES memories(memory_id) ON DELETE CASCADE,
+                embedding REAL[],
+                model_name VARCHAR(128) NOT NULL DEFAULT 'all-MiniLM-L6-v2',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_memory_vectors_384_lookup ON memory_vectors_384(project_id, memory_id);
         END IF;
     END $$;
     """)

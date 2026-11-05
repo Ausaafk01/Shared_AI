@@ -1,11 +1,18 @@
 -- AI Brain Phase 5: Milestone 5.1 Relational Schema Initialization
--- PostgreSQL 16+ with pgvector support
+-- PostgreSQL 16+ with optional pgvector support
 -- Authoritative Schema: 14 core tables, partitioned events, append-only rules, and Row-Level Security
 
 -- ============================================================================
--- Extensions
+-- Extensions (Graceful detection)
 -- ============================================================================
-CREATE EXTENSION IF NOT EXISTS vector;
+DO $$
+BEGIN
+    BEGIN
+        CREATE EXTENSION IF NOT EXISTS vector;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'pgvector extension not installed on system; memory_vectors_384 will use REAL[] array type';
+    END;
+END $$;
 
 -- ============================================================================
 -- 1. Projects (Root Tenant Boundary)
@@ -155,19 +162,33 @@ CREATE INDEX IF NOT EXISTS idx_graph_rel_target ON graph_relationships(project_i
 CREATE INDEX IF NOT EXISTS idx_graph_rel_type ON graph_relationships(project_id, relation_type);
 
 -- ============================================================================
--- 8. Memory Vectors (384-Dimensional Embeddings with HNSW Index)
+-- 8. Memory Vectors (384-Dimensional Embeddings)
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS memory_vectors_384 (
-    vector_id VARCHAR(64) PRIMARY KEY,
-    project_id VARCHAR(64) NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
-    memory_id VARCHAR(64) NOT NULL REFERENCES memories(memory_id) ON DELETE CASCADE,
-    embedding vector(384),
-    model_name VARCHAR(128) NOT NULL DEFAULT 'all-MiniLM-L6-v2',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_memory_vectors_384_lookup ON memory_vectors_384(project_id, memory_id);
--- HNSW cosine distance index
-CREATE INDEX IF NOT EXISTS idx_memory_vectors_384_hnsw ON memory_vectors_384 USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
+        CREATE TABLE IF NOT EXISTS memory_vectors_384 (
+            vector_id VARCHAR(64) PRIMARY KEY,
+            project_id VARCHAR(64) NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+            memory_id VARCHAR(64) NOT NULL REFERENCES memories(memory_id) ON DELETE CASCADE,
+            embedding vector(384),
+            model_name VARCHAR(128) NOT NULL DEFAULT 'all-MiniLM-L6-v2',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_memory_vectors_384_lookup ON memory_vectors_384(project_id, memory_id);
+        CREATE INDEX IF NOT EXISTS idx_memory_vectors_384_hnsw ON memory_vectors_384 USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+    ELSE
+        CREATE TABLE IF NOT EXISTS memory_vectors_384 (
+            vector_id VARCHAR(64) PRIMARY KEY,
+            project_id VARCHAR(64) NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+            memory_id VARCHAR(64) NOT NULL REFERENCES memories(memory_id) ON DELETE CASCADE,
+            embedding REAL[],
+            model_name VARCHAR(128) NOT NULL DEFAULT 'all-MiniLM-L6-v2',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_memory_vectors_384_lookup ON memory_vectors_384(project_id, memory_id);
+    END IF;
+END $$;
 
 -- ============================================================================
 -- 9. Agents (Registered Agent Identities)
@@ -280,78 +301,91 @@ CREATE INDEX IF NOT EXISTS idx_tasks_status_lease ON background_tasks(status, lo
 -- Enable and Force RLS on all tenant-owned tables
 ALTER TABLE project_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE project_members FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS project_members_tenant_isolation ON project_members;
 CREATE POLICY project_members_tenant_isolation ON project_members
     USING (project_id = NULLIF(current_setting('app.current_project_id', true), ''))
     WITH CHECK (project_id = NULLIF(current_setting('app.current_project_id', true), ''));
 
 ALTER TABLE events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE events FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS events_tenant_isolation ON events;
 CREATE POLICY events_tenant_isolation ON events
     USING (project_id = NULLIF(current_setting('app.current_project_id', true), ''))
     WITH CHECK (project_id = NULLIF(current_setting('app.current_project_id', true), ''));
 
 ALTER TABLE event_lookup ENABLE ROW LEVEL SECURITY;
 ALTER TABLE event_lookup FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS event_lookup_tenant_isolation ON event_lookup;
 CREATE POLICY event_lookup_tenant_isolation ON event_lookup
     USING (project_id = NULLIF(current_setting('app.current_project_id', true), ''))
     WITH CHECK (project_id = NULLIF(current_setting('app.current_project_id', true), ''));
 
 ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE memories FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memories_tenant_isolation ON memories;
 CREATE POLICY memories_tenant_isolation ON memories
     USING (project_id = NULLIF(current_setting('app.current_project_id', true), ''))
     WITH CHECK (project_id = NULLIF(current_setting('app.current_project_id', true), ''));
 
 ALTER TABLE graph_nodes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE graph_nodes FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS graph_nodes_tenant_isolation ON graph_nodes;
 CREATE POLICY graph_nodes_tenant_isolation ON graph_nodes
     USING (project_id = NULLIF(current_setting('app.current_project_id', true), ''))
     WITH CHECK (project_id = NULLIF(current_setting('app.current_project_id', true), ''));
 
 ALTER TABLE graph_relationships ENABLE ROW LEVEL SECURITY;
 ALTER TABLE graph_relationships FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS graph_relationships_tenant_isolation ON graph_relationships;
 CREATE POLICY graph_relationships_tenant_isolation ON graph_relationships
     USING (project_id = NULLIF(current_setting('app.current_project_id', true), ''))
     WITH CHECK (project_id = NULLIF(current_setting('app.current_project_id', true), ''));
 
 ALTER TABLE memory_vectors_384 ENABLE ROW LEVEL SECURITY;
 ALTER TABLE memory_vectors_384 FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memory_vectors_384_tenant_isolation ON memory_vectors_384;
 CREATE POLICY memory_vectors_384_tenant_isolation ON memory_vectors_384
     USING (project_id = NULLIF(current_setting('app.current_project_id', true), ''))
     WITH CHECK (project_id = NULLIF(current_setting('app.current_project_id', true), ''));
 
 ALTER TABLE agents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agents FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS agents_tenant_isolation ON agents;
 CREATE POLICY agents_tenant_isolation ON agents
     USING (project_id = NULLIF(current_setting('app.current_project_id', true), ''))
     WITH CHECK (project_id = NULLIF(current_setting('app.current_project_id', true), ''));
 
 ALTER TABLE agent_credentials ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_credentials FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS agent_credentials_tenant_isolation ON agent_credentials;
 CREATE POLICY agent_credentials_tenant_isolation ON agent_credentials
     USING (project_id = NULLIF(current_setting('app.current_project_id', true), ''))
     WITH CHECK (project_id = NULLIF(current_setting('app.current_project_id', true), ''));
 
 ALTER TABLE sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sessions FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS sessions_tenant_isolation ON sessions;
 CREATE POLICY sessions_tenant_isolation ON sessions
     USING (project_id = NULLIF(current_setting('app.current_project_id', true), ''))
     WITH CHECK (project_id = NULLIF(current_setting('app.current_project_id', true), ''));
 
 ALTER TABLE interactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE interactions FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS interactions_tenant_isolation ON interactions;
 CREATE POLICY interactions_tenant_isolation ON interactions
     USING (project_id = NULLIF(current_setting('app.current_project_id', true), ''))
     WITH CHECK (project_id = NULLIF(current_setting('app.current_project_id', true), ''));
 
 ALTER TABLE feedback_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE feedback_records FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS feedback_records_tenant_isolation ON feedback_records;
 CREATE POLICY feedback_records_tenant_isolation ON feedback_records
     USING (project_id = NULLIF(current_setting('app.current_project_id', true), ''))
     WITH CHECK (project_id = NULLIF(current_setting('app.current_project_id', true), ''));
 
 ALTER TABLE background_tasks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE background_tasks FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS background_tasks_tenant_isolation ON background_tasks;
 CREATE POLICY background_tasks_tenant_isolation ON background_tasks
     USING (project_id = NULLIF(current_setting('app.current_project_id', true), ''))
     WITH CHECK (project_id = NULLIF(current_setting('app.current_project_id', true), ''));

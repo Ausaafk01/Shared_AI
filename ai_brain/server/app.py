@@ -153,10 +153,11 @@ def create_app(
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
         req_id = getattr(request.state, "request_id", None)
+        err_code = "TOO_MANY_REQUESTS" if exc.status_code == status.HTTP_429_TOO_MANY_REQUESTS else "HTTP_ERROR"
         return JSONResponse(
             status_code=exc.status_code,
             content={
-                "error": "HTTP_ERROR",
+                "error": err_code,
                 "message": exc.detail,
                 "request_id": req_id,
             },

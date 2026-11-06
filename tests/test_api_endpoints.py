@@ -47,8 +47,10 @@ Covers:
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import json
 import os
+import time
 import unittest
 import uuid
 from typing import Any, Dict, List, Optional
@@ -56,6 +58,8 @@ from typing import Any, Dict, List, Optional
 from unittest.mock import AsyncMock, patch
 from starlette.requests import Request
 from fastapi.testclient import TestClient
+
+from ai_brain.loop.models import AgentInteractionInput, InteractionRecord, InteractionStatus
 
 from ai_brain.auth import (
     AuthenticatedIdentity,
@@ -704,6 +708,74 @@ class TestHttpRateLimiting(unittest.TestCase):
         self.assertIn("Retry-After", res_blocked.headers)
         self.assertEqual(res_blocked.json()["error"], "TOO_MANY_REQUESTS")
 
+    def test_same_api_key_same_project_shares_bucket(self) -> None:
+        agent_id = f"agent_lim_{uuid.uuid4().hex[:8]}"
+        created_key = self.container.auth_service.create_agent_api_key(
+            agent_id=agent_id,
+            project_id=self.project_id,
+            name="Limiter Agent",
+            scopes=["memory:read"],
+        )
+        headers = {"X-API-Key": created_key.raw_key}
+
+        # 5 requests succeed (bucket capacity = 5)
+        for _ in range(5):
+            res = self.client.get(f"/api/v1/projects/{self.project_id}/memories", headers=headers)
+            self.assertEqual(res.status_code, 200)
+
+        # 6th request with the same API key in the same project is rate-limited (429)
+        res_blocked = self.client.get(f"/api/v1/projects/{self.project_id}/memories", headers=headers)
+        self.assertEqual(res_blocked.status_code, 429)
+        self.assertIn("Retry-After", res_blocked.headers)
+
+    def test_same_api_key_identity_different_authorized_project_uses_independent_buckets(self) -> None:
+        agent_id = f"agent_shared_{uuid.uuid4().hex[:8]}"
+        proj_b = f"proj_lim_b_{uuid.uuid4().hex[:8]}"
+
+        key_a = self.container.auth_service.create_agent_api_key(
+            agent_id=agent_id,
+            project_id=self.project_id,
+            name="Agent in Proj A",
+            scopes=["memory:read"],
+        )
+        key_b = self.container.auth_service.create_agent_api_key(
+            agent_id=agent_id,
+            project_id=proj_b,
+            name="Agent in Proj B",
+            scopes=["memory:read"],
+        )
+
+        # Exhaust Project A's bucket
+        for _ in range(5):
+            res_a = self.client.get(f"/api/v1/projects/{self.project_id}/memories", headers={"X-API-Key": key_a.raw_key})
+            self.assertEqual(res_a.status_code, 200)
+        res_a_blocked = self.client.get(f"/api/v1/projects/{self.project_id}/memories", headers={"X-API-Key": key_a.raw_key})
+        self.assertEqual(res_a_blocked.status_code, 429)
+
+        # Project B with Key B for same agent identity operates in an independent bucket and succeeds
+        res_b = self.client.get(f"/api/v1/projects/{proj_b}/memories", headers={"X-API-Key": key_b.raw_key})
+        self.assertEqual(res_b.status_code, 200)
+
+    def test_unauthorized_project_switching_cannot_create_or_access_bucket(self) -> None:
+        agent_id = f"agent_isolated_{uuid.uuid4().hex[:8]}"
+        foreign_proj = f"proj_foreign_{uuid.uuid4().hex[:8]}"
+        key_a = self.container.auth_service.create_agent_api_key(
+            agent_id=agent_id,
+            project_id=self.project_id,
+            name="Isolated Agent",
+            scopes=["memory:read"],
+        )
+
+        initial_buckets = self.limiter.active_bucket_count()
+
+        # Attempt to access foreign_proj using key authorized ONLY for self.project_id
+        res = self.client.get(f"/api/v1/projects/{foreign_proj}/memories", headers={"X-API-Key": key_a.raw_key})
+        # Strictly rejected by RBAC with 403 Forbidden
+        self.assertEqual(res.status_code, 403)
+
+        # Crucial check: No bucket for foreign_proj was ever created or accessed
+        self.assertEqual(self.limiter.active_bucket_count(), initial_buckets)
+
     def test_independent_identity_rate_limit_buckets(self) -> None:
         headers1 = {"Authorization": f"Bearer {self.token}"}
         for _ in range(5):
@@ -803,6 +875,211 @@ class TestServerSentEventsStreaming(BaseAPITestCase):
         self.assertGreater(len(chunks), 1)
         full_streamed_response = "".join(chunks)
         self.assertIn("PostgreSQL", full_streamed_response)
+
+    def test_disconnect_after_at_least_one_progressive_agent_chunk(self) -> None:
+        idem_key = f"disc_chunk_{uuid.uuid4().hex[:8]}"
+        stream_payload = {
+            "input_text": "Progressive chunk generation that will be interrupted mid-stream",
+            "idempotency_key": idem_key,
+            "agent_id": "agent-coder",
+        }
+
+        # Mock is_disconnected: False on prep, False on context, False on chunk 0, True on chunk 1
+        with patch("starlette.requests.Request.is_disconnected", new_callable=AsyncMock) as mock_disc:
+            mock_disc.side_effect = [False, False, False, True, True, True, True]
+
+            res = self.client.post(
+                f"/api/v1/projects/{self.project_a}/interactions/stream",
+                headers={"Authorization": f"Bearer {self.owner_token}"},
+                json=stream_payload,
+            )
+            self.assertEqual(res.status_code, 200)
+
+            # Delivered prepare, context_delivered, and at least 1 agent_chunk
+            self.assertIn("event: prepare", res.text)
+            self.assertIn("event: context_delivered", res.text)
+            self.assertIn("event: agent_chunk", res.text)
+            # Completion was cancelled: never reached completion or done
+            self.assertNotIn("event: completion", res.text)
+            self.assertNotIn("event: done", res.text)
+
+            # Zero memories written to memory_store
+            self.assertEqual(self.container.memory_store.count(project_id=self.project_a), 0)
+
+            # Interaction record in store is marked FAILED / INTERRUPTED
+            saved_rec = self.container.interaction_store.get_by_idempotency_key(idem_key)
+            self.assertIsNotNone(saved_rec)
+            self.assertEqual(saved_rec.status.value, "FAILED")
+            self.assertIn("INTERRUPTED", saved_rec.current_stage)
+
+    def test_reconnect_using_same_idempotency_key_after_interruption(self) -> None:
+        idem_key = f"recon_{uuid.uuid4().hex[:8]}"
+        stream_payload = {
+            "input_text": "Setup PostgreSQL database connection pooling for reconnection",
+            "idempotency_key": idem_key,
+            "agent_id": "agent-coder",
+        }
+
+        # 1. First attempt: interrupted mid-stream
+        with patch("starlette.requests.Request.is_disconnected", new_callable=AsyncMock) as mock_disc:
+            mock_disc.side_effect = [False, False, False, True, True, True]
+            res1 = self.client.post(
+                f"/api/v1/projects/{self.project_a}/interactions/stream",
+                headers={"Authorization": f"Bearer {self.owner_token}"},
+                json=stream_payload,
+            )
+            self.assertEqual(res1.status_code, 200)
+            self.assertNotIn("event: completion", res1.text)
+
+        # Zero memories written during interrupted attempt
+        self.assertEqual(self.container.memory_store.count(project_id=self.project_a), 0)
+
+        # 2. Reconnection attempt with same idempotency key (normal connection without disconnect)
+        res2 = self.client.post(
+            f"/api/v1/projects/{self.project_a}/interactions/stream",
+            headers={"Authorization": f"Bearer {self.owner_token}"},
+            json=stream_payload,
+        )
+        self.assertEqual(res2.status_code, 200)
+        self.assertIn("event: completion", res2.text)
+        self.assertIn("event: done", res2.text)
+
+        # Exactly ONE completed record in store
+        completed_rec = self.container.interaction_store.get_by_idempotency_key(idem_key)
+        self.assertIsNotNone(completed_rec)
+        self.assertEqual(completed_rec.status.value, "COMPLETED")
+
+        # Exactly ONE completion's memories persisted (not duplicated)
+        self.assertEqual(self.container.memory_store.count(project_id=self.project_a), 1)
+
+    def test_multiple_retries_after_interruption(self) -> None:
+        idem_key = f"multi_retry_{uuid.uuid4().hex[:8]}"
+        payload = {
+            "input_text": "Setup PostgreSQL database connection pooling for multiple retries",
+            "idempotency_key": idem_key,
+            "agent_id": "agent-coder",
+        }
+
+        # Attempt 1: disconnects early
+        with patch("starlette.requests.Request.is_disconnected", new_callable=AsyncMock) as mock_disc:
+            mock_disc.side_effect = [False, True, True, True]
+            self.client.post(
+                f"/api/v1/projects/{self.project_a}/interactions/stream",
+                headers={"Authorization": f"Bearer {self.owner_token}"},
+                json=payload,
+            )
+        self.assertEqual(self.container.memory_store.count(project_id=self.project_a), 0)
+
+        # Attempt 2: disconnects mid-stream
+        with patch("starlette.requests.Request.is_disconnected", new_callable=AsyncMock) as mock_disc:
+            mock_disc.side_effect = [False, False, False, True, True]
+            self.client.post(
+                f"/api/v1/projects/{self.project_a}/interactions/stream",
+                headers={"Authorization": f"Bearer {self.owner_token}"},
+                json=payload,
+            )
+        self.assertEqual(self.container.memory_store.count(project_id=self.project_a), 0)
+
+        # Attempt 3: runs to completion
+        res3 = self.client.post(
+            f"/api/v1/projects/{self.project_a}/interactions/stream",
+            headers={"Authorization": f"Bearer {self.owner_token}"},
+            json=payload,
+        )
+        self.assertEqual(res3.status_code, 200)
+        self.assertIn("event: completion", res3.text)
+        self.assertIn("event: done", res3.text)
+        self.assertEqual(self.container.memory_store.count(project_id=self.project_a), 1)
+
+    def test_two_concurrent_requests_with_same_key_rejected(self) -> None:
+        idem_key = f"concurrent_{uuid.uuid4().hex[:8]}"
+        payload = {
+            "input_text": "Concurrent invocation conflict check",
+            "idempotency_key": idem_key,
+            "agent_id": "agent-coder",
+        }
+
+        # Reserve key actively in manager to simulate ongoing execution
+        scoped_key = f"{self.project_a}:{idem_key}"
+        self.container.idempotency_manager._active_reservations[scoped_key] = {
+            "start_mono": time.monotonic(),
+            "interaction_id": "int_concurrent_test",
+        }
+
+        try:
+            # Second concurrent request with the same key arrives while first is active
+            res_concurrent = self.client.post(
+                f"/api/v1/projects/{self.project_a}/interactions/stream",
+                headers={"Authorization": f"Bearer {self.owner_token}"},
+                json=payload,
+            )
+            # Rejected with HTTP 409 Conflict
+            self.assertEqual(res_concurrent.status_code, 409)
+            resp_body = res_concurrent.json()
+            err_msg = resp_body.get("message") or resp_body.get("detail", "")
+            self.assertIn("currently IN_PROGRESS", err_msg)
+        finally:
+            self.container.idempotency_manager.release_active(scoped_key)
+
+    def test_zero_partial_memory_writes_when_operation_abandoned(self) -> None:
+        idem_key = f"abandoned_{uuid.uuid4().hex[:8]}"
+        payload = {
+            "input_text": "Abandoned interaction test verifying zero memory writes",
+            "idempotency_key": idem_key,
+            "agent_id": "agent-coder",
+        }
+
+        with patch("starlette.requests.Request.is_disconnected", new_callable=AsyncMock) as mock_disc:
+            mock_disc.side_effect = [False, False, False, True, True]
+            self.client.post(
+                f"/api/v1/projects/{self.project_a}/interactions/stream",
+                headers={"Authorization": f"Bearer {self.owner_token}"},
+                json=payload,
+            )
+
+        # Abandoned interaction must leave 0 memories written
+        self.assertEqual(self.container.memory_store.count(project_id=self.project_a), 0)
+
+    def test_recovery_of_stale_in_progress_reservations(self) -> None:
+        idem_key = f"stale_{uuid.uuid4().hex[:8]}"
+        payload = {
+            "input_text": "Recovery from crash or stale in-progress state",
+            "idempotency_key": idem_key,
+            "agent_id": "agent-coder",
+        }
+
+        # Seed an interaction in store with status INITIALIZED and updated_at 60s in the past (stale)
+        stale_time = datetime.now(timezone.utc) - timedelta(seconds=60)
+        stale_rec = InteractionRecord(
+            interaction_id=f"int_stale_{uuid.uuid4().hex[:8]}",
+            idempotency_key=idem_key,
+            project_id=self.project_a,
+            agent_id="agent-coder",
+            session_id=f"sess_{uuid.uuid4().hex[:8]}",
+            status=InteractionStatus.INITIALIZED,
+            current_stage="INITIALIZED",
+            input=AgentInteractionInput(
+                interaction_id=f"int_stale_{uuid.uuid4().hex[:8]}",
+                project_id=self.project_a,
+                agent_id="agent-coder",
+                session_id=f"sess_{uuid.uuid4().hex[:8]}",
+                content=payload["input_text"],
+                idempotency_key=idem_key,
+            ),
+            created_at=stale_time,
+            updated_at=stale_time,
+        )
+        self.container.interaction_store.save(stale_rec)
+
+        # Incoming request must not be blocked by stale reservation; it reclaims and completes cleanly
+        res = self.client.post(
+            f"/api/v1/projects/{self.project_a}/interactions/stream",
+            headers={"Authorization": f"Bearer {self.owner_token}"},
+            json=payload,
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("event: completion", res.text)
+        self.assertIn("event: done", res.text)
 
     def test_idempotency_key_reconnection_no_duplicate_writes(self) -> None:
         idem_key = f"sse_idem_{uuid.uuid4().hex[:8]}"

@@ -14,6 +14,8 @@ from fastapi import Depends, Header, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from ai_brain.agents.collaboration.workflow import CollaborationEngine
+from ai_brain.server.idempotency import IdempotencyManager
+from ai_brain.server.limiter import HttpRateLimiter
 from ai_brain.agents.sessions.manager import SessionManager
 from ai_brain.agents.sessions.models import SessionRecord
 from ai_brain.agents.sessions.storage.sqlite import SQLiteSessionStore
@@ -92,6 +94,7 @@ class BrainServiceContainer:
         brain_loop: BrainLoop,
         session_manager: SessionManager,
         collaboration_engine: CollaborationEngine,
+        idempotency_manager: Optional[IdempotencyManager] = None,
     ) -> None:
         self.config = config
         self.db_manager = db_manager
@@ -113,6 +116,7 @@ class BrainServiceContainer:
         self.brain_loop = brain_loop
         self.session_manager = session_manager
         self.collaboration_engine = collaboration_engine
+        self.idempotency_manager = idempotency_manager or IdempotencyManager()
 
     def close(self) -> None:
         """Gracefully release stores and database connection pools."""
@@ -381,16 +385,17 @@ async def get_current_identity(
 
 
 def require_permission(permission: Permission) -> Callable[..., Any]:
-    """Dependency factory checking that caller has permission in target project_id."""
+    """Dependency factory checking that caller has permission in target project_id and enforcing rate limits."""
 
     async def _authorizer(
         project_id: str,
+        request: Request,
         identity: AuthenticatedIdentity = Depends(get_current_identity),
         container: BrainServiceContainer = Depends(get_container),
     ) -> AuthenticatedIdentity:
+        # Step 1: Authorize identity against project_id and required permission
         try:
             container.rbac_service.authorize(identity, project_id, permission)
-            return identity
         except (PermissionDeniedError, PrivilegeEscalationError) as e:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -401,5 +406,20 @@ def require_permission(permission: Permission) -> Callable[..., Any]:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Authorization failure: {e}",
             )
+
+        # Step 2: Rate limit enforcement keyed by validated identity and authorized project
+        limiter: Optional[HttpRateLimiter] = getattr(request.app.state, "limiter", None)
+        if limiter is not None:
+            bucket_key = limiter.build_authenticated_key(identity, project_id)
+            allowed, retry_after = limiter.check_bucket(bucket_key, is_authenticated=True)
+            if not allowed:
+                req_id = getattr(request.state, "request_id", None)
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=f"Rate limit exceeded for project '{project_id}'. Try again in {int(retry_after)} seconds.",
+                    headers={"Retry-After": str(int(retry_after))},
+                )
+
+        return identity
 
     return _authorizer

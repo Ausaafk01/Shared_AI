@@ -148,6 +148,57 @@ class HttpRateLimiter:
         client_ip = self.resolve_client_ip(request)
         return f"unauth:ip:{client_ip}", False
 
+    def build_authenticated_key(
+        self,
+        identity: Any,
+        authorized_project_id: str,
+    ) -> str:
+        """
+        Construct rate-limit bucket key incorporating the validated identity and authorized project ID.
+        
+        Guarantees:
+        - Never uses an unvalidated project ID from unauthenticated headers or paths.
+        - Keys by identity_type, authorized_project_id, and identity_id.
+        - Separate authorized projects under the same identity receive isolated buckets.
+        """
+        id_type = (
+            identity.identity_type.value
+            if hasattr(identity.identity_type, "value")
+            else str(identity.identity_type)
+        )
+        if id_type.upper() == "AGENT":
+            return f"auth:apikey:{authorized_project_id}:{identity.identity_id}"
+        return f"auth:jwt:{authorized_project_id}:{identity.identity_id}"
+
+    def check_bucket(
+        self,
+        bucket_key: str,
+        is_authenticated: bool = True,
+        custom_rpm: Optional[int] = None,
+    ) -> Tuple[bool, float]:
+        """Check and consume rate limit directly using a pre-resolved bucket key."""
+        rpm = (
+            custom_rpm
+            if custom_rpm is not None
+            else (self.authenticated_rpm if is_authenticated else self.unauthenticated_rpm)
+        )
+        refill_rate = max(0.001, rpm / 60.0)
+        capacity = max(1.0, float(rpm) * self.burst_multiplier)
+
+        with self._lock:
+            self._check_counter += 1
+            if self._check_counter % 100 == 0 or len(self._buckets) >= self.max_buckets:
+                self._prune_expired()
+
+            bucket = self._buckets.get(bucket_key)
+            if bucket is None:
+                if len(self._buckets) >= self.max_buckets:
+                    self._evict_oldest()
+                bucket = TokenBucket(capacity=capacity, refill_rate=refill_rate)
+                self._buckets[bucket_key] = bucket
+
+            return bucket.consume(1.0)
+
     def check(
         self,
         request: Request,
@@ -160,30 +211,10 @@ class HttpRateLimiter:
             (allowed: bool, retry_after_seconds: float)
         """
         if custom_key:
-            key = custom_key
-            is_auth = True
-        else:
-            key, is_auth = self.resolve_bucket_key(request)
-
-        # Select rate parameters
-        rpm = custom_rpm if custom_rpm is not None else (self.authenticated_rpm if is_auth else self.unauthenticated_rpm)
-        refill_rate = max(0.001, rpm / 60.0)
-        capacity = max(1.0, float(rpm) * self.burst_multiplier)
-
-        with self._lock:
-            self._check_counter += 1
-            if self._check_counter % 100 == 0 or len(self._buckets) >= self.max_buckets:
-                self._prune_expired()
-
-            bucket = self._buckets.get(key)
-            if bucket is None:
-                # If at absolute capacity, force prune or evict oldest
-                if len(self._buckets) >= self.max_buckets:
-                    self._evict_oldest()
-                bucket = TokenBucket(capacity=capacity, refill_rate=refill_rate)
-                self._buckets[key] = bucket
-
-            return bucket.consume(1.0)
+            return self.check_bucket(custom_key, is_authenticated=True, custom_rpm=custom_rpm)
+        
+        key, is_auth = self.resolve_bucket_key(request)
+        return self.check_bucket(key, is_authenticated=is_auth, custom_rpm=custom_rpm)
 
     def _prune_expired(self) -> None:
         """Purge buckets that have been inactive longer than entry_ttl_seconds."""
@@ -230,24 +261,34 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if request.url.path in ("/healthz", "/readyz", "/openapi.json", "/docs", "/redoc"):
             return await call_next(request)
 
-        allowed, retry_after = self.limiter.check(request)
-        if not allowed:
-            req_id = getattr(request.state, "request_id", None)
-            logger.warning(
-                "Rate limit exceeded on %s (Retry-After: %ds)",
-                request.url.path,
-                retry_after,
-            )
-            return JSONResponse(
-                status_code=429,
-                content={
-                    "error": "TOO_MANY_REQUESTS",
-                    "message": f"Rate limit exceeded. Try again in {int(retry_after)} seconds.",
-                    "request_id": req_id,
-                },
-                headers={
-                    "Retry-After": str(int(retry_after)),
-                },
-            )
+        # If request carries credentials, authenticated rate limiting is enforced in require_permission
+        # after identity validation and project authorization.
+        # Unauthenticated requests are checked against the IP bucket at this middleware layer.
+        has_auth_header = bool(
+            request.headers.get("x-api-key")
+            or request.headers.get("authorization", "").strip().startswith(("Bearer ", "ApiKey "))
+        )
+        if not has_auth_header:
+            client_ip = self.limiter.resolve_client_ip(request)
+            allowed, retry_after = self.limiter.check_bucket(f"unauth:ip:{client_ip}", is_authenticated=False)
+            if not allowed:
+                req_id = getattr(request.state, "request_id", None)
+                logger.warning(
+                    "Unauthenticated rate limit exceeded on %s for IP %s (Retry-After: %ds)",
+                    request.url.path,
+                    client_ip,
+                    retry_after,
+                )
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "error": "TOO_MANY_REQUESTS",
+                        "message": f"Rate limit exceeded. Try again in {int(retry_after)} seconds.",
+                        "request_id": req_id,
+                    },
+                    headers={
+                        "Retry-After": str(int(retry_after)),
+                    },
+                )
 
         return await call_next(request)

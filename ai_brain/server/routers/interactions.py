@@ -28,6 +28,11 @@ from ai_brain.server.dependencies import (
     get_container,
     require_permission,
 )
+from ai_brain.server.idempotency import (
+    IdempotencyManager,
+    IdempotencyReservation,
+    IdempotencyStatus,
+)
 from ai_brain.server.schemas import (
     ContextItemDTO,
     ContextPackageDTO,
@@ -213,6 +218,14 @@ async def complete_interaction(
             detail=f"Interaction completion failed: {e}",
         )
 
+    # Persist extracted memories to container memory store if configured
+    if hasattr(container, "memory_store") and container.memory_store is not None:
+        for m in completion_result.extracted_memories:
+            try:
+                container.memory_store.store(m)
+            except Exception as e:
+                logger.warning("Failed to store extracted memory '%s' in memory_store: %s", m.memory_id, e)
+
     mem_created = [
         {"memory_id": m.memory_id, "content": m.content, "version": m.version}
         for m in completion_result.extracted_memories
@@ -338,6 +351,7 @@ async def list_interactions(
         },
         401: {"model": ErrorResponse, "description": "Unauthorized"},
         403: {"model": ErrorResponse, "description": "Forbidden"},
+        409: {"model": ErrorResponse, "description": "Conflict: Concurrent request or payload mismatch"},
     },
 )
 async def stream_interaction(
@@ -347,23 +361,27 @@ async def stream_interaction(
     identity: AuthenticatedIdentity = Depends(require_permission(Permission.INTERACTION_EXECUTE)),
     container: BrainServiceContainer = Depends(get_container),
 ) -> StreamingResponse:
-    """Streams interaction execution via SSE, yielding real-time progressive chunks, context tokens, and completion."""
+    """Streams interaction execution via SSE with atomic reservation, disconnect recovery, and concurrency safety."""
+    # 1. Atomically reserve idempotency key before execution begins
+    reservation: Optional[IdempotencyReservation] = None
+    interaction_id = f"int_sse_{uuid.uuid4().hex[:12]}"
+    existing_record: Optional[InteractionRecord] = None
+
+    if payload.idempotency_key:
+        idempotency_mgr: IdempotencyManager = container.idempotency_manager
+        reservation = idempotency_mgr.reserve(
+            project_id=project_id,
+            idempotency_key=payload.idempotency_key,
+            input_content=payload.input_text,
+            interaction_store=container.interaction_store,
+        )
+        interaction_id = reservation.interaction_id
+        existing_record = reservation.existing_record
 
     async def event_generator() -> AsyncGenerator[str, None]:
-        # Idempotency check: inspect if this key was already seen or completed
-        existing_record = None
-        if payload.idempotency_key:
-            existing_record = container.brain_loop.interaction_store.get_by_idempotency_key(payload.idempotency_key)
-
-        interaction_id = (
-            existing_record.interaction_id
-            if existing_record
-            else f"int_sse_{uuid.uuid4().hex[:12]}"
-        )
-
         try:
             # Reconnection optimization: if already completed, replay cached events without duplicate writes
-            if existing_record and existing_record.status == InteractionStatus.COMPLETED:
+            if existing_record and existing_record.status in (InteractionStatus.COMPLETED, InteractionStatus.PARTIAL_SUCCESS):
                 yield f"event: prepare\ndata: {json.dumps({'interaction_id': interaction_id, 'status': 'PREPARING', 'replayed': True, 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
                 if await request.is_disconnected():
                     return
@@ -394,18 +412,45 @@ async def stream_interaction(
                 yield f"event: done\ndata: {json.dumps({'interaction_id': interaction_id, 'status': 'FINISHED', 'replayed': True})}\n\n"
                 return
 
+            def _mark_interrupted(reason: str) -> None:
+                logger.info("Marking interaction '%s' as INTERRUPTED: %s", interaction_id, reason)
+                rec = container.brain_loop.interaction_store.get(interaction_id)
+                if rec and rec.status not in (InteractionStatus.COMPLETED, InteractionStatus.PARTIAL_SUCCESS):
+                    failed_rec = InteractionRecord(
+                        interaction_id=rec.interaction_id,
+                        idempotency_key=rec.idempotency_key,
+                        project_id=rec.project_id,
+                        agent_id=rec.agent_id,
+                        session_id=rec.session_id,
+                        status=InteractionStatus.FAILED,
+                        current_stage="INTERRUPTED",
+                        stages_completed=rec.stages_completed,
+                        input=rec.input,
+                        input_event_id=rec.input_event_id,
+                        context_event_id=rec.context_event_id,
+                        context_result=rec.context_result,
+                        error_message=f"INTERRUPTED: {reason}",
+                        created_at=rec.created_at,
+                        updated_at=datetime.now(timezone.utc),
+                    )
+                    container.brain_loop.interaction_store.save(failed_rec)
+
             # 1. Emit prepare event
             yield f"event: prepare\ndata: {json.dumps({'interaction_id': interaction_id, 'status': 'PREPARING', 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
             await asyncio.sleep(0.01)
 
             # Check client disconnect before preparing context
             if await request.is_disconnected():
-                logger.info("Client disconnected before context preparation for '%s'", interaction_id)
+                _mark_interrupted("Client disconnected before context preparation")
                 return
 
             # 2. Prepare Context
-            stream_session_id = payload.session_id or f"sess_{uuid.uuid4().hex[:8]}"
-            agent_id = payload.agent_id or identity.identity_id
+            if existing_record is not None:
+                stream_session_id = existing_record.session_id
+                agent_id = existing_record.agent_id
+            else:
+                stream_session_id = payload.session_id or f"sess_{uuid.uuid4().hex[:8]}"
+                agent_id = payload.agent_id or identity.identity_id
             agent_input = AgentInteractionInput(
                 interaction_id=interaction_id,
                 project_id=project_id,
@@ -437,7 +482,7 @@ async def stream_interaction(
             await asyncio.sleep(0.01)
 
             if await request.is_disconnected():
-                logger.info("Client disconnected after context delivery for '%s'", interaction_id)
+                _mark_interrupted("Client disconnected after context delivery")
                 return
 
             # 4. Resolve agent and stream progressive chunks
@@ -462,7 +507,7 @@ async def stream_interaction(
             full_response = ""
             for idx, chunk in enumerate(agent.stream_response(prep_result, exec_req)):
                 if await request.is_disconnected():
-                    logger.info("Client disconnected during chunk streaming for '%s'", interaction_id)
+                    _mark_interrupted(f"Client disconnected during chunk streaming (chunk {idx})")
                     return
                 full_response += chunk
                 chunk_data = {
@@ -475,7 +520,7 @@ async def stream_interaction(
 
             # Check client disconnect before completion commit
             if await request.is_disconnected():
-                logger.info("Client disconnected before completion for '%s'", interaction_id)
+                _mark_interrupted("Client disconnected before completion commit")
                 return
 
             # 5. Complete interaction and extract memories
@@ -487,6 +532,14 @@ async def stream_interaction(
                 content=full_response,
             )
             completion = container.brain_loop.complete_interaction(resp_input)
+
+            # Persist extracted memories to container memory store if configured
+            if hasattr(container, "memory_store") and container.memory_store is not None:
+                for m in completion.extracted_memories:
+                    try:
+                        container.memory_store.store(m)
+                    except Exception as e:
+                        logger.warning("Failed to store extracted memory '%s' in memory_store: %s", m.memory_id, e)
 
             comp_data = {
                 "interaction_id": interaction_id,
@@ -502,11 +555,23 @@ async def stream_interaction(
 
         except Exception as e:
             logger.error("SSE streaming failure on '%s': %s", interaction_id, e)
-            safe_message = "An error occurred during streaming execution."
-            if isinstance(e, (HTTPException, ValueError)):
-                safe_message = str(e)
+            safe_message = f"{type(e).__name__}: {e}"
             err_data = {"interaction_id": interaction_id, "error": "STREAM_ERROR", "message": safe_message}
             yield f"event: error\ndata: {json.dumps(err_data)}\n\n"
+
+        finally:
+            if reservation is not None:
+                reservation.release()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
     return StreamingResponse(
         event_generator(),

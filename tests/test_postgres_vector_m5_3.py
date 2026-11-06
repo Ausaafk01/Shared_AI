@@ -13,6 +13,9 @@ Acceptance Test Matrix:
 10. Transaction rollback on failure and connection sanitization.
 11. Full integration with VectorMemoryManager and domain Memory instances.
 12. Full integration with RetrievalEngine for vector and hybrid search via RRF fusion.
+13. Missing pgvector extension handling and explicit opt-in fallback semantics.
+14. Strengthened multi-tenant HNSW filtering against distractor projects with 2,000+ vectors.
+15. Query plan verification (EXPLAIN HNSW vs Seq Scan) and transaction-local fallback sanitization.
 """
 
 from __future__ import annotations
@@ -842,70 +845,253 @@ class TestPostgresVectorM53(unittest.TestCase):
         self.assertEqual(fallback_res.matches[0].memory_id, "mem_nofallback")
 
     # -------------------------------------------------------------------------
-    # 14. HNSW Search Under Multi-Tenant Isolation with Distractor Projects
+    # 14. Strengthened Multi-Tenant HNSW Filtering with Distractor Projects
     # -------------------------------------------------------------------------
     def test_14_hnsw_search_under_tenant_isolation_with_distractor_projects(self) -> None:
-        """Verify HNSW search under multi-tenant isolation returns complete top_k without cross-tenant leakage."""
+        """Verify HNSW search under tenant isolation with 2,000+ distractor vectors across multiple foreign projects."""
         target_project = f"proj_target_{uuid.uuid4().hex[:6]}"
-        distractor_project = f"proj_dist_{uuid.uuid4().hex[:6]}"
-        store = PostgreSQLVectorStore(self.app_db, default_project_id=target_project)
+        foreign_project_1 = f"proj_foreign1_{uuid.uuid4().hex[:6]}"
+        foreign_project_2 = f"proj_foreign2_{uuid.uuid4().hex[:6]}"
 
-        # Base query vector
-        query_vec = [1.0] + [0.0] * 383
-
-        # Add 30 distractor records in distractor_project that are extremely close to query_vec
-        for i in range(30):
-            d_vec = [0.999] + [0.0] * 383
-            d_vec[1] = 0.001 * (i + 1)
-            norm = math.sqrt(sum(x * x for x in d_vec))
-            d_vec = [x / norm for x in d_vec]
-            store.add_vector(
-                VectorRecord.create(
-                    record_id=f"rec_dist_{i}_{uuid.uuid4().hex[:6]}",
-                    project_id=distractor_project,
-                    memory_id=f"mem_dist_{i}",
-                    embedding=d_vec,
-                    model_id="eval-model",
-                    content=f"Distractor content {i}",
-                )
-            )
-
-        # Add 10 records in target_project that are slightly further
-        for i in range(10):
-            t_vec = [0.95] + [0.0] * 383
-            t_vec[2] = 0.01 * (i + 1)
-            norm = math.sqrt(sum(x * x for x in t_vec))
-            t_vec = [x / norm for x in t_vec]
-            store.add_vector(
-                VectorRecord.create(
-                    record_id=f"rec_tgt_{i}_{uuid.uuid4().hex[:6]}",
-                    project_id=target_project,
-                    memory_id=f"mem_tgt_{i}",
-                    embedding=t_vec,
-                    model_id="eval-model",
-                    content=f"Target content {i}",
-                )
-            )
-
-        # Execute search under target_project with top_k = 10
-        res = store.search_similarity(
-            query_vector=query_vec,
-            project_id=target_project,
-            top_k=10,
+        # Configure store with low ef_search to deliberately exercise candidate filtering
+        store = PostgreSQLVectorStore(
+            self.app_db,
+            default_project_id=target_project,
+            hnsw_ef_search=10,
+            hnsw_iterative_scan="relaxed_order",
         )
 
-        # 1. Exactly 10 results returned (no loss of candidates due to project filtering)
-        self.assertEqual(len(res.matches), 10, "Target project search must return all 10 eligible candidates")
+        # Base query vector pointing along axis 0
+        query_vec = [1.0] + [0.0] * 383
 
-        # 2. Every single result strictly belongs to target_project
-        for m in res.matches:
+        # Populate 2,000 distractor vectors across two foreign projects (1,000 each)
+        # Distractor vectors are deliberately placed extremely close to query_vec (cos sim ~ 0.999)
+        for f_proj in (foreign_project_1, foreign_project_2):
+            with self.app_db.tenant_context(f_proj) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("INSERT INTO projects (project_id, name) VALUES (%s, %s);", (f_proj, f_proj))
+                    mem_rows = [
+                        (f"mem_dist_{f_proj}_{i}", f_proj, 1, f"Foreign content {i}", "ACTIVE")
+                        for i in range(1000)
+                    ]
+                    cur.executemany(
+                        "INSERT INTO memories (memory_id, project_id, version, content, status) VALUES (%s, %s, %s, %s, %s);",
+                        mem_rows,
+                    )
+                    vec_rows = []
+                    for i in range(1000):
+                        d_vec = [0.999] + [0.0] * 383
+                        d_vec[1] = 0.0001 * (i + 1)
+                        norm = math.sqrt(sum(x * x for x in d_vec))
+                        d_lit = "[" + ",".join(str(x / norm) for x in d_vec) + "]"
+                        vec_rows.append(
+                            (
+                                f"vec_dist_{f_proj}_{i}",
+                                f_proj,
+                                f"mem_dist_{f_proj}_{i}",
+                                1,
+                                d_lit,
+                                "eval-model",
+                                f"Foreign {i}",
+                                "ACTIVE",
+                                "{}",
+                            )
+                        )
+                    cur.executemany(
+                        """
+                        INSERT INTO memory_vectors_384 (
+                            vector_id, project_id, memory_id, version, embedding, model_name, content, status, metadata
+                        ) VALUES (%s, %s, %s, %s, %s::vector, %s, %s, %s, %s::jsonb);
+                        """,
+                        vec_rows,
+                    )
+                conn.commit()
+
+        # Populate target project with exactly 20 vectors:
+        # - 10 vectors at similarity ~0.95 (coord 0 = 0.95, coord 2 = sqrt(1 - 0.95^2))
+        # - 10 vectors at similarity ~0.80 (coord 0 = 0.80, coord 3 = sqrt(1 - 0.80^2))
+        for i in range(10):
+            t_vec = [0.0] * 384
+            t_vec[0] = 0.95
+            t_vec[2] = math.sqrt(1.0 - 0.95 * 0.95)
+            # Add slight unique perturbation in high dimension to ensure unique embeddings
+            t_vec[10 + i] = 0.001
+            norm = math.sqrt(sum(x * x for x in t_vec))
+            store.add_vector(
+                VectorRecord.create(
+                    record_id=f"rec_tgt_high_{i}_{uuid.uuid4().hex[:6]}",
+                    project_id=target_project,
+                    memory_id=f"mem_tgt_high_{i}",
+                    embedding=[x / norm for x in t_vec],
+                    model_id="eval-model",
+                    content=f"Target high similarity content {i}",
+                )
+            )
+
+        for i in range(10):
+            t_vec = [0.0] * 384
+            t_vec[0] = 0.80
+            t_vec[3] = math.sqrt(1.0 - 0.80 * 0.80)
+            # Add slight unique perturbation in high dimension to ensure unique embeddings
+            t_vec[20 + i] = 0.001
+            norm = math.sqrt(sum(x * x for x in t_vec))
+            store.add_vector(
+                VectorRecord.create(
+                    record_id=f"rec_tgt_med_{i}_{uuid.uuid4().hex[:6]}",
+                    project_id=target_project,
+                    memory_id=f"mem_tgt_med_{i}",
+                    embedding=[x / norm for x in t_vec],
+                    model_id="eval-model",
+                    content=f"Target medium similarity content {i}",
+                )
+            )
+
+        # 1. Search with top_k = 10 (when >= 10 exist): returns exactly 10
+        res_k10 = store.search_similarity(query_vector=query_vec, project_id=target_project, top_k=10)
+        self.assertEqual(len(res_k10.matches), 10, "Target search must return exactly 10 matches")
+        for m in res_k10.matches:
             self.assertEqual(m.project_id, target_project)
             self.assertTrue(m.memory_id.startswith("mem_tgt_"))
 
-        # 3. Distractor records are completely absent
-        retrieved_ids = {m.memory_id for m in res.matches}
-        for i in range(30):
-            self.assertNotIn(f"mem_dist_{i}", retrieved_ids)
+        # 2. Search with top_k = 20 (when >= 20 exist): returns exactly 20
+        res_k20 = store.search_similarity(query_vector=query_vec, project_id=target_project, top_k=20)
+        self.assertEqual(len(res_k20.matches), 20, "Target search must return exactly 20 matches")
+        for m in res_k20.matches:
+            self.assertEqual(m.project_id, target_project)
+            self.assertTrue(m.memory_id.startswith("mem_tgt_"))
+
+        # 3. Search when fewer than K exist (top_k = 25, but target only has 20): returns exactly 20
+        res_k25 = store.search_similarity(query_vector=query_vec, project_id=target_project, top_k=25)
+        self.assertEqual(len(res_k25.matches), 20, "Target search must return all 20 existing records without padding")
+        self.assertEqual(res_k25.total_candidates, 20)
+
+        # 4. Search with similarity_threshold = 0.90 (top_k = 20): returns exactly 10 records (only those >= 0.90)
+        res_thresh = store.search_similarity(
+            query_vector=query_vec,
+            project_id=target_project,
+            top_k=20,
+            similarity_threshold=0.90,
+        )
+        self.assertEqual(len(res_thresh.matches), 10, "Threshold search must prune vectors below 0.90")
+        for m in res_thresh.matches:
+            self.assertGreaterEqual(m.score, 0.90)
+            self.assertTrue(m.memory_id.startswith("mem_tgt_high_"))
+
+        # 5. Verify zero records from foreign projects leaked into ANY result
+        all_retrieved_ids = {
+            m.memory_id
+            for res in (res_k10, res_k20, res_k25, res_thresh)
+            for m in res.matches
+        }
+        for f_proj in (foreign_project_1, foreign_project_2):
+            for i in range(1000):
+                self.assertNotIn(f"mem_dist_{f_proj}_{i}", all_retrieved_ids)
+
+        # 6. Verify Row-Level Security is active and forced on memory_vectors_384
+        with self.app_db.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT relrowsecurity, relforcerowsecurity
+                    FROM pg_class
+                    WHERE relname = 'memory_vectors_384';
+                    """
+                )
+                rls_row = cur.fetchone()
+                self.assertIsNotNone(rls_row)
+                self.assertTrue(rls_row[0], "relrowsecurity must be TRUE on memory_vectors_384")
+                self.assertTrue(rls_row[1], "relforcerowsecurity must be TRUE on memory_vectors_384")
+
+        # 7. Verify structured diagnostics
+        diag = store.search_diagnostics
+        self.assertGreaterEqual(diag["approximate_search_count"], 4)
+        self.assertEqual(diag["hnsw_ef_search"], 10)
+        self.assertEqual(diag["hnsw_iterative_scan"], "relaxed_order")
+        self.assertFalse(diag["allow_in_memory_fallback"])
+
+    # -------------------------------------------------------------------------
+    # 15. Query Plan Verification & Transaction-Local Fallback Semantics
+    # -------------------------------------------------------------------------
+    def test_15_exact_fallback_semantics_and_query_plans(self) -> None:
+        """Verify approximate vs fallback EXPLAIN query plans and connection sanitization."""
+        test_project = f"proj_plan_{uuid.uuid4().hex[:6]}"
+        store = PostgreSQLVectorStore(self.app_db, default_project_id=test_project)
+
+        # Add 15 test vectors
+        for i in range(15):
+            vec = _make_dense_vector(384, seed=float(i + 1))
+            store.add_vector(
+                VectorRecord.create(
+                    record_id=f"rec_plan_{i}_{uuid.uuid4().hex[:6]}",
+                    project_id=test_project,
+                    memory_id=f"mem_plan_{i}",
+                    embedding=vec,
+                    model_id="test-model",
+                    content=f"Plan content {i}",
+                )
+            )
+
+        query_vec = _make_dense_vector(384, seed=99.0)
+        q_lit = "[" + ",".join(str(x) for x in query_vec) + "]"
+
+        # 1. Verify Approximate Query Plan uses HNSW index scan
+        with self.app_db.tenant_context(test_project) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SET LOCAL enable_seqscan = off;")
+                cur.execute("SET LOCAL enable_sort = off;")
+                cur.execute(
+                    """
+                    EXPLAIN SELECT memory_id FROM memory_vectors_384
+                    WHERE project_id = %s
+                    ORDER BY embedding <=> %s::vector ASC
+                    LIMIT 5;
+                    """,
+                    (test_project, q_lit),
+                )
+                plan_approx = [r[0] for r in cur.fetchall()]
+        self.assertTrue(
+            any("idx_memory_vectors_384_hnsw" in l for l in plan_approx),
+            f"Approximate plan must use HNSW index. Plan: {plan_approx}",
+        )
+
+        # 2. Verify Exact Fallback Plan uses Seq Scan when index scan is disabled
+        with self.app_db.tenant_context(test_project) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SET LOCAL enable_indexscan = off;")
+                cur.execute("SET LOCAL enable_bitmapscan = off;")
+                cur.execute(
+                    """
+                    EXPLAIN SELECT memory_id FROM memory_vectors_384
+                    WHERE project_id = %s
+                    ORDER BY embedding <=> %s::vector ASC
+                    LIMIT 5;
+                    """,
+                    (test_project, q_lit),
+                )
+                plan_exact = [r[0] for r in cur.fetchall()]
+        self.assertTrue(
+            any("Seq Scan on memory_vectors_384" in l for l in plan_exact),
+            f"Fallback plan must use Seq Scan. Plan: {plan_exact}",
+        )
+
+        # 3. Verify Connection Sanitization: enable_indexscan is restored to 'on' outside local transaction
+        with self.app_db.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SHOW enable_indexscan;")
+                idx_setting = cur.fetchone()[0]
+                self.assertEqual(idx_setting, "on", "Connection sanitization must restore enable_indexscan to 'on'")
+
+                cur.execute("SHOW enable_bitmapscan;")
+                bmp_setting = cur.fetchone()[0]
+                self.assertEqual(bmp_setting, "on", "Connection sanitization must restore enable_bitmapscan to 'on'")
+
+        # 4. Confirm unprivileged connection: current_user is app user, not superuser
+        with self.app_db.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT current_user, usesuper FROM pg_user WHERE usename = current_user;")
+                user_info = cur.fetchone()
+                self.assertEqual(user_info[0], "ai_brain_app_user")
+                self.assertFalse(user_info[1], "App user must not be a PostgreSQL superuser")
 
 
 if __name__ == "__main__":

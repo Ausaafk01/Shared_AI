@@ -97,6 +97,29 @@ class PostgreSQLVectorStore(VectorStore):
         if default_project_id:
             self._known_projects.add(default_project_id)
         self._has_vector_ext: Optional[bool] = None
+        self._approximate_search_count: int = 0
+        self._exact_fallback_count: int = 0
+
+    @property
+    def approximate_search_count(self) -> int:
+        """Count of similarity search executions utilizing PostgreSQL vector engine."""
+        return self._approximate_search_count
+
+    @property
+    def exact_fallback_count(self) -> int:
+        """Count of approximate index scans supplemented by controlled exact scan fallback."""
+        return self._exact_fallback_count
+
+    @property
+    def search_diagnostics(self) -> Dict[str, Any]:
+        """Structured diagnostics for observability without exposing tenant data or secrets."""
+        return {
+            "approximate_search_count": self._approximate_search_count,
+            "exact_fallback_count": self._exact_fallback_count,
+            "hnsw_ef_search": self.hnsw_ef_search,
+            "hnsw_iterative_scan": self.hnsw_iterative_scan,
+            "allow_in_memory_fallback": self.allow_in_memory_fallback,
+        }
 
     def has_pgvector(self) -> bool:
         """Check if pgvector extension is installed and active in PostgreSQL."""
@@ -483,6 +506,7 @@ class PostgreSQLVectorStore(VectorStore):
         with self.db.tenant_context(proj) as conn:
             with conn.cursor() as cur:
                 if self.has_pgvector():
+                    self._approximate_search_count += 1
                     # Configure HNSW search parameters in PostgreSQL session
                     cur.execute("SELECT set_config('hnsw.ef_search', %s, true);", (str(self.hnsw_ef_search),))
                     if self.hnsw_iterative_scan in ("off", "relaxed_order", "strict_order"):
@@ -540,6 +564,9 @@ class PostgreSQLVectorStore(VectorStore):
                     if model_id:
                         count_sql += " AND model_name = %s"
                         count_params.append(model_id)
+                    if similarity_threshold is not None:
+                        count_sql += " AND (1.0 - (embedding <=> %s::vector)) >= %s"
+                        count_params.extend([vec_literal, float(similarity_threshold)])
                     cur.execute(count_sql + ";", count_params)
                     count_row = cur.fetchone()
                     total_candidates = int(count_row[0]) if count_row else len(matches)
@@ -547,7 +574,8 @@ class PostgreSQLVectorStore(VectorStore):
                     # Controlled exact scan fallback if approximate HNSW returned fewer than requested top_k
                     # but eligible matching candidates exist within this tenant boundary
                     target_k = min(top_k, total_candidates) if top_k > 0 else total_candidates
-                    if similarity_threshold is None and len(matches) < target_k:
+                    if len(matches) < target_k:
+                        self._exact_fallback_count += 1
                         logger.debug(
                             "HNSW approximate search returned %d items, but tenant has %d candidates. "
                             "Executing controlled exact scan fallback to guarantee completeness.",
@@ -555,6 +583,7 @@ class PostgreSQLVectorStore(VectorStore):
                             total_candidates,
                         )
                         cur.execute("SET LOCAL enable_indexscan = off;")
+                        cur.execute("SET LOCAL enable_bitmapscan = off;")
                         cur.execute(sql, params)
                         rows = cur.fetchall()
                         matches = []

@@ -43,7 +43,7 @@ class ProjectRole(StrEnum):
 
 
 class Permission(StrEnum):
-    """Authoritative inventory of exactly 28 fine-grained domain permissions for AI Brain."""
+    """Authoritative inventory of exactly 28 fine-grained domain permissions across 11 functional domains for AI Brain."""
     # Project lifecycle (3)
     PROJECT_READ = "PROJECT_READ"
     PROJECT_UPDATE = "PROJECT_UPDATE"

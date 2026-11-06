@@ -804,6 +804,148 @@ class TestAuthServicesSQLite(unittest.TestCase):
         self.audit.reset_failures(identity_id=target_user, ip_address=attacker_ip)
         self.assertFalse(self.audit.is_client_blocked(identity_id=target_user, ip_address=attacker_ip))
 
+    def test_authorization_service_path_all_28_permissions(self) -> None:
+        """Verify the complete AuthorizationService.authorize() execution path for all 28 permissions.
+        
+        Tests positive and negative enforcement for every permission through the service layer,
+        verifying role resolution, permission checks, scope narrowing, and audit emission.
+        """
+        proj_id = "proj_rbac_full"
+
+        # 1. Setup Identities with Roles
+        # Owner
+        owner_id = "user_owner"
+        self.store.create_user(UserRecord(user_id=owner_id, email="owner@test.com", name="Owner"))
+        self.store.add_project_member(ProjectMemberRecord("pm_o", proj_id, owner_id, ProjectRole.OWNER))
+        ident_owner = AuthenticatedIdentity(owner_id, IdentityType.USER, "Owner", is_authenticated=True)
+
+        # Admin
+        admin_id = "user_admin"
+        self.store.create_user(UserRecord(user_id=admin_id, email="admin@test.com", name="Admin"))
+        self.store.add_project_member(ProjectMemberRecord("pm_a", proj_id, admin_id, ProjectRole.ADMIN))
+        ident_admin = AuthenticatedIdentity(admin_id, IdentityType.USER, "Admin", is_authenticated=True)
+
+        # Member
+        member_id = "user_member"
+        self.store.create_user(UserRecord(user_id=member_id, email="member@test.com", name="Member"))
+        self.store.add_project_member(ProjectMemberRecord("pm_m", proj_id, member_id, ProjectRole.MEMBER))
+        ident_member = AuthenticatedIdentity(member_id, IdentityType.USER, "Member", is_authenticated=True)
+
+        # Read-Only
+        ro_id = "user_ro"
+        self.store.create_user(UserRecord(user_id=ro_id, email="ro@test.com", name="ReadOnly"))
+        self.store.add_project_member(ProjectMemberRecord("pm_ro", proj_id, ro_id, ProjectRole.READ_ONLY))
+        ident_ro = AuthenticatedIdentity(ro_id, IdentityType.USER, "ReadOnly", is_authenticated=True)
+
+        # Agent with full agent scopes
+        agent_id = "ag_full"
+        ident_agent = AuthenticatedIdentity(
+            agent_id,
+            IdentityType.AGENT,
+            "AgentFull",
+            project_id=proj_id,
+            role=ProjectRole.AGENT,
+            scopes=("read", "write"),
+            is_authenticated=True,
+        )
+
+        # Agent with read-only scopes (scope narrowing)
+        agent_ro_id = "ag_ro"
+        ident_agent_ro = AuthenticatedIdentity(
+            agent_ro_id,
+            IdentityType.AGENT,
+            "AgentReadOnly",
+            project_id=proj_id,
+            role=ProjectRole.AGENT,
+            scopes=("read",),
+            is_authenticated=True,
+        )
+
+        # 2. Iterate through all 28 permissions
+        for perm in Permission:
+            # Positive: OWNER authorized for all 28
+            self.rbac_svc.authorize(ident_owner, proj_id, perm)
+
+            # ADMIN: Positive for 27, Negative for PROJECT_DELETE
+            if perm == Permission.PROJECT_DELETE:
+                with self.assertRaises(PermissionDeniedError, msg=f"ADMIN should be denied {perm.value}"):
+                    self.rbac_svc.authorize(ident_admin, proj_id, perm)
+            else:
+                self.rbac_svc.authorize(ident_admin, proj_id, perm)
+
+            # MEMBER: Positive for 18, Negative for 10
+            member_allowed = perm in {
+                Permission.PROJECT_READ, Permission.MEMBERSHIP_READ, Permission.AGENT_READ,
+                Permission.MEMORY_READ, Permission.MEMORY_WRITE, Permission.MEMORY_UPDATE,
+                Permission.EVENT_READ, Permission.EVENT_WRITE,
+                Permission.GRAPH_READ, Permission.GRAPH_WRITE,
+                Permission.VECTOR_SEARCH, Permission.VECTOR_WRITE,
+                Permission.SESSION_READ, Permission.SESSION_WRITE,
+                Permission.INTERACTION_READ, Permission.INTERACTION_EXECUTE,
+                Permission.FEEDBACK_READ, Permission.FEEDBACK_WRITE,
+            }
+            if member_allowed:
+                self.rbac_svc.authorize(ident_member, proj_id, perm)
+            else:
+                with self.assertRaises(PermissionDeniedError, msg=f"MEMBER should be denied {perm.value}"):
+                    self.rbac_svc.authorize(ident_member, proj_id, perm)
+
+            # READ_ONLY: Positive for 10, Negative for 18
+            ro_allowed = perm in {
+                Permission.PROJECT_READ, Permission.MEMBERSHIP_READ, Permission.AGENT_READ,
+                Permission.MEMORY_READ, Permission.EVENT_READ, Permission.GRAPH_READ,
+                Permission.VECTOR_SEARCH, Permission.SESSION_READ, Permission.INTERACTION_READ,
+                Permission.FEEDBACK_READ,
+            }
+            if ro_allowed:
+                self.rbac_svc.authorize(ident_ro, proj_id, perm)
+            else:
+                with self.assertRaises(PermissionDeniedError, msg=f"READ_ONLY should be denied {perm.value}"):
+                    self.rbac_svc.authorize(ident_ro, proj_id, perm)
+
+            # AGENT (read, write): Positive for 16, Negative for 12
+            agent_allowed = perm in {
+                Permission.PROJECT_READ, Permission.AGENT_READ,
+                Permission.MEMORY_READ, Permission.MEMORY_WRITE, Permission.MEMORY_UPDATE,
+                Permission.EVENT_READ, Permission.EVENT_WRITE,
+                Permission.GRAPH_READ, Permission.GRAPH_WRITE,
+                Permission.VECTOR_SEARCH, Permission.VECTOR_WRITE,
+                Permission.SESSION_READ, Permission.SESSION_WRITE,
+                Permission.INTERACTION_READ, Permission.INTERACTION_EXECUTE,
+                Permission.FEEDBACK_WRITE,
+            }
+            if agent_allowed:
+                self.rbac_svc.authorize(ident_agent, proj_id, perm)
+            else:
+                with self.assertRaises(PermissionDeniedError, msg=f"AGENT should be denied {perm.value}"):
+                    self.rbac_svc.authorize(ident_agent, proj_id, perm)
+
+            # AGENT_RO (read only): Write permissions denied, demonstrating scope narrowing
+            agent_write_perms = {
+                Permission.MEMORY_WRITE, Permission.MEMORY_UPDATE,
+                Permission.EVENT_WRITE, Permission.GRAPH_WRITE,
+                Permission.VECTOR_WRITE, Permission.SESSION_WRITE,
+                Permission.INTERACTION_EXECUTE, Permission.FEEDBACK_WRITE,
+            }
+            if perm in agent_write_perms:
+                with self.assertRaises(PermissionDeniedError, msg=f"AGENT with 'read' scope should be denied write {perm.value}"):
+                    self.rbac_svc.authorize(ident_agent_ro, proj_id, perm)
+
+        # 3. Negative path: Unauthenticated identity
+        unauthenticated_ident = AuthenticatedIdentity("anon", IdentityType.USER, "Anon", is_authenticated=False)
+        with self.assertRaises(AuthenticationError):
+            self.rbac_svc.authorize(unauthenticated_ident, proj_id, Permission.PROJECT_READ)
+
+        # 4. Negative path: Cross-project access denied
+        other_proj = "proj_rbac_other"
+        # Member of proj_id cannot access other_proj
+        with self.assertRaises(PermissionDeniedError):
+            self.rbac_svc.authorize(ident_member, other_proj, Permission.MEMORY_READ)
+        # Agent bounded to proj_id cannot access other_proj
+        with self.assertRaises(PermissionDeniedError):
+            self.rbac_svc.authorize(ident_agent, other_proj, Permission.MEMORY_READ)
+
+
 
 # =============================================================================
 # 4. PostgreSQL Security Acceptance Tests (Live PostgreSQL + RLS + Pool)

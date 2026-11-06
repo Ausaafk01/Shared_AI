@@ -1,7 +1,7 @@
 """Role-Based Access Control (RBAC) permission matrix and enforcement engine.
 
 Authoritative Permission Inventory:
-Exactly 28 granular permissions across 10 functional domains:
+Exactly 28 granular permissions across 11 functional domains:
 - Project lifecycle (3): PROJECT_READ, PROJECT_UPDATE, PROJECT_DELETE
 - Membership management (2): MEMBERSHIP_READ, MEMBERSHIP_MANAGE
 - Agent registry (3): AGENT_READ, AGENT_REGISTER, AGENT_MANAGE

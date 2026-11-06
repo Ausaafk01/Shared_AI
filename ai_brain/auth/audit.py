@@ -1,4 +1,27 @@
-"""Structured security audit logging and suspicious activity detection for AI Brain."""
+"""Structured security audit logging and suspicious activity detection for AI Brain.
+
+Architectural Notice on Brute-Force Failure Tracking:
+------------------------------------------------------
+The sliding-window failure tracker within `SecurityAuditLogger` is process-local
+and in-memory. It maintains recent failure timestamps in thread-safe memory and
+resets on process restart.
+
+Operational Scope in Distributed / Multi-Instance Deployments (M5.5+):
+- Process-Local Defense: Provides low-latency, zero-dependency protection against rapid
+  local brute-force probing without external infrastructure.
+- Multi-Instance Scope: In horizontally scaled production deployments with multiple API
+  workers, perimeter rate limiting (e.g., token bucket / leaky bucket) should be handled
+  at the reverse proxy, load balancer, or API gateway layer (e.g. Nginx, Envoy, Cloudflare).
+- No External Dependencies: Strictly avoids external cache/Redis dependencies to preserve
+  lightweight offline and embedded execution.
+
+Denial-of-Service (DoS) Mitigation:
+- To prevent an attacker from intentionally locking out legitimate users across unrelated
+  tenants by submitting malicious failures under a victim's user ID, tracking is keyed by
+  composite tuples incorporating client IP address and tenant project scope.
+- Blocking is applied to the attacking client/IP address rather than globally locking the
+  targeted identity across all sources.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +31,7 @@ import json
 import logging
 import threading
 import time
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 import uuid
 
 from ai_brain.auth.models import SecurityAuditEvent
@@ -49,7 +72,7 @@ def sanitize_audit_details(data: Any) -> Any:
 
 
 class SecurityAuditLogger:
-    """Thread-safe structured security audit logger with brute-force anomaly detection."""
+    """Thread-safe structured security audit logger with process-local brute-force anomaly detection."""
 
     def __init__(
         self,
@@ -65,7 +88,7 @@ class SecurityAuditLogger:
 
         self._lock = threading.Lock()
         self._events: List[SecurityAuditEvent] = []
-        # Key: client_identifier (ip or identity_id) -> list of failure timestamps
+        # Key: composite client tracker key -> list of failure timestamps
         self._failure_history: Dict[str, List[float]] = defaultdict(list)
 
     @property
@@ -73,6 +96,22 @@ class SecurityAuditLogger:
         """Snapshot of in-memory recorded audit events."""
         with self._lock:
             return list(self._events)
+
+    def _build_tracker_key(
+        self,
+        identity_id: Optional[str] = None,
+        ip_address: Optional[str] = None,
+        project_id: Optional[str] = None,
+    ) -> str:
+        """Construct composite tracking key to prevent cross-tenant and cross-identity lockout."""
+        parts = []
+        if project_id:
+            parts.append(f"p:{project_id}")
+        if ip_address:
+            parts.append(f"ip:{ip_address}")
+        if identity_id:
+            parts.append(f"id:{identity_id}")
+        return "#".join(parts) if parts else "unknown"
 
     def record_event(
         self,
@@ -124,8 +163,8 @@ class SecurityAuditLogger:
 
         # Check for repeated failures / brute force
         if status == "FAILURE" and (identity_id or ip_address):
-            client_key = identity_id or ip_address or "unknown"
-            self._check_repeated_failures(client_key, project_id, ip_address)
+            tracker_key = self._build_tracker_key(identity_id, ip_address, project_id)
+            self._check_repeated_failures(tracker_key, identity_id, project_id, ip_address)
 
         # Call persistent storage handler if configured
         if self._persistence_handler:
@@ -138,26 +177,26 @@ class SecurityAuditLogger:
 
     def _check_repeated_failures(
         self,
-        client_key: str,
+        tracker_key: str,
+        identity_id: Optional[str],
         project_id: Optional[str],
         ip_address: Optional[str],
     ) -> None:
         """Detect repeated authentication failures exceeding threshold within time window."""
         now = time.time()
         with self._lock:
-            failures = self._failure_history[client_key]
-            # Prune timestamps outside window
+            failures = self._failure_history[tracker_key]
             cutoff = now - self._window_seconds
             pruned = [t for t in failures if t >= cutoff]
             pruned.append(now)
-            self._failure_history[client_key] = pruned
+            self._failure_history[tracker_key] = pruned
 
             if len(pruned) >= self._failure_threshold:
                 # Trigger suspicious repeated failure alert event
                 alert_event = SecurityAuditEvent(
                     event_id=f"audit_alert_{uuid.uuid4().hex[:12]}",
                     event_type="BRUTE_FORCE_SUSPECTED",
-                    identity_id=client_key if client_key != ip_address else None,
+                    identity_id=identity_id,
                     identity_type="UNKNOWN",
                     project_id=project_id,
                     action="AUTHENTICATE",
@@ -165,7 +204,8 @@ class SecurityAuditLogger:
                     details={
                         "failure_count": len(pruned),
                         "window_seconds": self._window_seconds,
-                        "client_identifier": client_key,
+                        "tracker_key": tracker_key,
+                        "ip_address": ip_address,
                     },
                     ip_address=ip_address,
                     timestamp=datetime.now(timezone.utc),
@@ -173,7 +213,7 @@ class SecurityAuditLogger:
                 self._events.append(alert_event)
                 logger.critical(
                     "SECURITY_ALERT: Brute force suspected for '%s' (%d failures in %.0fs)",
-                    client_key,
+                    tracker_key,
                     len(pruned),
                     self._window_seconds,
                 )
@@ -183,3 +223,56 @@ class SecurityAuditLogger:
                     except Exception:
                         pass
 
+    # -------------------------------------------------------------------------
+    # Interfaces for M5.5 HTTP Rate Limiting & Defense Hooks
+    # -------------------------------------------------------------------------
+    def is_client_blocked(
+        self,
+        identity_id: Optional[str] = None,
+        ip_address: Optional[str] = None,
+        project_id: Optional[str] = None,
+    ) -> bool:
+        """Check whether client or IP currently exceeds the failure threshold."""
+        now = time.time()
+        cutoff = now - self._window_seconds
+        tracker_key = self._build_tracker_key(identity_id, ip_address, project_id)
+
+        with self._lock:
+            # Check specific composite key
+            failures = [t for t in self._failure_history.get(tracker_key, []) if t >= cutoff]
+            if len(failures) >= self._failure_threshold:
+                return True
+
+            # If IP is provided, also check IP-level threshold to stop distributed identity attacks
+            if ip_address:
+                ip_key = self._build_tracker_key(ip_address=ip_address, project_id=project_id)
+                ip_failures = [t for t in self._failure_history.get(ip_key, []) if t >= cutoff]
+                if len(ip_failures) >= self._failure_threshold:
+                    return True
+
+        return False
+
+    def reset_failures(
+        self,
+        identity_id: Optional[str] = None,
+        ip_address: Optional[str] = None,
+        project_id: Optional[str] = None,
+    ) -> None:
+        """Clear recorded failure history upon successful authentication."""
+        tracker_key = self._build_tracker_key(identity_id, ip_address, project_id)
+        with self._lock:
+            if tracker_key in self._failure_history:
+                del self._failure_history[tracker_key]
+
+    def get_failure_count(
+        self,
+        identity_id: Optional[str] = None,
+        ip_address: Optional[str] = None,
+        project_id: Optional[str] = None,
+    ) -> int:
+        """Return the active failure count within the current sliding window."""
+        now = time.time()
+        cutoff = now - self._window_seconds
+        tracker_key = self._build_tracker_key(identity_id, ip_address, project_id)
+        with self._lock:
+            return len([t for t in self._failure_history.get(tracker_key, []) if t >= cutoff])

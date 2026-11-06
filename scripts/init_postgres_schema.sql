@@ -517,3 +517,43 @@ DROP POLICY IF EXISTS background_tasks_tenant_isolation ON background_tasks;
 CREATE POLICY background_tasks_tenant_isolation ON background_tasks
     USING (project_id = NULLIF(current_setting('app.current_project_id', true), ''))
     WITH CHECK (project_id = NULLIF(current_setting('app.current_project_id', true), ''));
+
+-- ============================================================================
+-- 16. Security Definer Helper Functions
+-- ============================================================================
+-- Authenticate agent key without tenant context, returning only minimum credential information.
+CREATE OR REPLACE FUNCTION public.authenticate_agent_key(p_key_hash VARCHAR)
+RETURNS TABLE (
+    credential_id VARCHAR(64),
+    agent_id VARCHAR(64),
+    project_id VARCHAR(64),
+    name VARCHAR(255),
+    key_hash VARCHAR(128),
+    key_prefix VARCHAR(16),
+    scopes JSONB,
+    expires_at TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+    SELECT ac.credential_id, ac.agent_id, ac.project_id, ac.name, ac.key_hash, ac.key_prefix,
+           ac.scopes, ac.expires_at, ac.revoked_at
+    FROM public.agent_credentials ac
+    WHERE ac.key_hash = p_key_hash;
+$$;
+
+REVOKE ALL ON FUNCTION public.authenticate_agent_key(VARCHAR) FROM PUBLIC;
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ai_brain_app_user') THEN
+        GRANT ALL ON TABLE users TO ai_brain_app_user;
+        GRANT ALL ON TABLE security_audit_events TO ai_brain_app_user;
+        GRANT ALL ON TABLE agent_credentials TO ai_brain_app_user;
+        GRANT EXECUTE ON FUNCTION public.authenticate_agent_key(VARCHAR) TO ai_brain_app_user;
+    END IF;
+END $$;
+

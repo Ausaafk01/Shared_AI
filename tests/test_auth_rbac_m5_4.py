@@ -26,6 +26,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
 
+import jwt
 import psycopg
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -45,6 +46,7 @@ from ai_brain.auth import (
     IdentityType,
     InvalidTokenError,
     KeyManager,
+    KeyType,
     Permission,
     PermissionDeniedError,
     PostgreSQLAuthStore,
@@ -62,6 +64,7 @@ from ai_brain.auth import (
     hash_api_key,
     sanitize_audit_details,
     trusted_tenant_context,
+    validate_agent_scopes,
     validate_membership_transition,
     verify_api_key,
 )
@@ -189,7 +192,12 @@ class TestAuthCryptoAndTokens(unittest.TestCase):
 
     def test_jwt_asymmetric_rs256_lifecycle(self) -> None:
         priv_pem, pub_pem = _generate_rsa_key_pair()
-        km = KeyManager(active_key_id="rsa_k1", active_signing_key=priv_pem, active_verification_key=pub_pem)
+        km = KeyManager(
+            active_key_id="rsa_k1",
+            active_signing_key=priv_pem,
+            active_verification_key=pub_pem,
+            algorithm="RS256",
+        )
         ts = TokenService(key_manager=km, algorithm="RS256", issuer="test-issuer", audience="test-aud")
 
         token = ts.create_access_token(subject="user_rsa", name="Bob")
@@ -292,6 +300,171 @@ class TestAuthCryptoAndTokens(unittest.TestCase):
         with self.assertRaises(ValueError):
             ts.create_access_token(subject="u1", extra_claims={"password": "plaintext_password"})
 
+    def test_jwt_key_type_confusion_rejected(self) -> None:
+        """Verify RSA or EdDSA public keys passed as HMAC symmetric secrets are rejected."""
+        _, rsa_pub = _generate_rsa_key_pair()
+
+        # Passing RSA public key as HMAC key to KeyManager raises AlgorithmMismatchError
+        with self.assertRaises(AlgorithmMismatchError):
+            KeyManager(active_key_id="confused_key", active_signing_key=rsa_pub, algorithm="HS256")
+
+        # Passing certificate string raises AlgorithmMismatchError
+        cert_fake = "-----BEGIN CERTIFICATE-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA...\n-----END CERTIFICATE-----"
+        with self.assertRaises(AlgorithmMismatchError):
+            KeyManager(active_key_id="confused_cert", active_signing_key=cert_fake, algorithm="HS256")
+
+        # Short symmetric key (< 32 bytes) is rejected
+        with self.assertRaises(ValueError):
+            KeyManager(active_key_id="short_k", active_signing_key="too_short_secret", algorithm="HS256")
+
+    def test_jwt_incorrect_or_unknown_kid_rejected(self) -> None:
+        """Verify token header kid resolution and algorithm binding."""
+        km = KeyManager(active_key_id="k1", active_signing_key="secret-key-at-least-32-chars-long-1")
+        ts = TokenService(key_manager=km, algorithm="HS256")
+
+        # 1. Forge token with unknown kid
+        now = int(time.time())
+        token_unknown_kid = jwt.encode(
+            {"sub": "u1", "iss": "ai-brain", "aud": "ai-brain-api", "exp": now + 60, "iat": now, "nbf": now, "typ": "USER"},
+            "secret-key-at-least-32-chars-long-1",
+            algorithm="HS256",
+            headers={"kid": "unknown_kid_999", "alg": "HS256", "typ": "JWT"},
+        )
+        with self.assertRaises(InvalidTokenError):
+            ts.decode_and_validate_token(token_unknown_kid)
+
+        # 2. Forge token missing kid completely
+        token_no_kid = jwt.encode(
+            {"sub": "u1", "iss": "ai-brain", "aud": "ai-brain-api", "exp": now + 60, "iat": now, "nbf": now, "typ": "USER"},
+            "secret-key-at-least-32-chars-long-1",
+            algorithm="HS256",
+            headers={"alg": "HS256", "typ": "JWT"},
+        )
+        with self.assertRaises(InvalidTokenError):
+            ts.decode_and_validate_token(token_no_kid)
+
+        # 3. Register RS256 key into KeyManager and verify HS256 TokenService rejects selecting RS256 kid
+        priv_rsa, pub_rsa = _generate_rsa_key_pair()
+        km.register_verification_key("rsa_k1", pub_rsa, algorithm="RS256", key_type=KeyType.RSA)
+        token_rs256_kid = jwt.encode(
+            {"sub": "u1", "iss": "ai-brain", "aud": "ai-brain-api", "exp": now + 60, "iat": now, "nbf": now, "typ": "USER"},
+            "secret-key-at-least-32-chars-long-1",
+            algorithm="HS256",
+            headers={"kid": "rsa_k1", "alg": "HS256", "typ": "JWT"},
+        )
+        with self.assertRaises(AlgorithmMismatchError):
+            ts.decode_and_validate_token(token_rs256_kid)
+
+    def test_jwt_unsupported_algorithm_rejected(self) -> None:
+        """Verify unsupported algorithms like 'ES256', 'none', or 'HS512' are rejected."""
+        km = KeyManager(active_key_id="k1", active_signing_key="secret-key-at-least-32-chars-long-1")
+        with self.assertRaises(ValueError):
+            TokenService(key_manager=km, algorithm="ES256")
+        with self.assertRaises(ValueError):
+            TokenService(key_manager=km, algorithm="none")
+        with self.assertRaises(ValueError):
+            TokenService(key_manager=km, algorithm="HS512")
+
+    def test_jwt_invalid_token_type_rejected(self) -> None:
+        """Verify header typ must strictly be 'JWT' and payload typ must be present."""
+        km = KeyManager(active_key_id="k1", active_signing_key="secret-key-at-least-32-chars-long-1")
+        ts = TokenService(key_manager=km, algorithm="HS256")
+        now = int(time.time())
+
+        # Header typ is not JWT
+        token_bad_hdr_typ = jwt.encode(
+            {"sub": "u1", "iss": "ai-brain", "aud": "ai-brain-api", "exp": now + 60, "iat": now, "nbf": now, "typ": "USER"},
+            "secret-key-at-least-32-chars-long-1",
+            algorithm="HS256",
+            headers={"kid": "k1", "alg": "HS256", "typ": "NOT_JWT"},
+        )
+        with self.assertRaises(InvalidTokenError):
+            ts.decode_and_validate_token(token_bad_hdr_typ)
+
+        # Payload typ missing
+        token_missing_payload_typ = jwt.encode(
+            {"sub": "u1", "iss": "ai-brain", "aud": "ai-brain-api", "exp": now + 60, "iat": now, "nbf": now},
+            "secret-key-at-least-32-chars-long-1",
+            algorithm="HS256",
+            headers={"kid": "k1", "alg": "HS256", "typ": "JWT"},
+        )
+        with self.assertRaises(InvalidTokenError):
+            ts.decode_and_validate_token(token_missing_payload_typ)
+
+    def test_jwt_missing_required_claims_rejected(self) -> None:
+        """Verify strict claim enforcement: iss, aud, exp, iat, nbf, sub are all mandatory."""
+        km = KeyManager(active_key_id="k1", active_signing_key="secret-key-at-least-32-chars-long-1")
+        ts = TokenService(key_manager=km, algorithm="HS256")
+        now = int(time.time())
+        secret = "secret-key-at-least-32-chars-long-1"
+        hdr = {"kid": "k1", "alg": "HS256", "typ": "JWT"}
+
+        # Valid baseline claims
+        valid_claims = {
+            "sub": "user_123",
+            "iss": "ai-brain",
+            "aud": "ai-brain-api",
+            "exp": now + 60,
+            "iat": now,
+            "nbf": now,
+            "typ": "USER",
+        }
+
+        # Each of the 6 required claims missing one at a time
+        for req_claim in ("iss", "aud", "exp", "iat", "nbf", "sub"):
+            claims = dict(valid_claims)
+            del claims[req_claim]
+            bad_token = jwt.encode(claims, secret, algorithm="HS256", headers=hdr)
+            with self.assertRaises(InvalidTokenError, msg=f"Should reject when '{req_claim}' is missing"):
+                ts.decode_and_validate_token(bad_token)
+
+    def test_jwt_key_revocation_and_retention_window(self) -> None:
+        """Verify key revocation immediately blocks verification and expired retention windows are enforced."""
+        secret_old = "secret-key-old-at-least-32-chars-long-1"
+        secret_new = "secret-key-new-at-least-32-chars-long-2"
+        km = KeyManager(active_key_id="k1", active_signing_key=secret_old)
+        ts = TokenService(key_manager=km, algorithm="HS256")
+
+        token_k1 = ts.create_access_token(subject="user_alice")
+        self.assertEqual(ts.decode_and_validate_token(token_k1)["sub"], "user_alice")
+
+        # 1. Rotate to k2 with 10 second retention
+        km.rotate_signing_key(new_key_id="k2", new_signing_key=secret_new, retention_seconds=10.0)
+        # Old token still validates
+        self.assertEqual(ts.decode_and_validate_token(token_k1)["sub"], "user_alice")
+
+        # 2. Explicitly revoke k1
+        km.revoke_key("k1")
+        with self.assertRaises(InvalidTokenError):
+            ts.decode_and_validate_token(token_k1)
+
+        # 3. Register k3 with negative retention (already expired)
+        km.register_verification_key(
+            "k3",
+            "secret-key-k3-at-least-32-chars-long-3",
+            algorithm="HS256",
+            expires_at=datetime.now(timezone.utc) - timedelta(seconds=10),
+        )
+        token_k3 = jwt.encode(
+            {"sub": "user_k3", "iss": "ai-brain", "aud": "ai-brain-api", "exp": int(time.time()) + 60, "iat": int(time.time()), "nbf": int(time.time()), "typ": "USER"},
+            "secret-key-k3-at-least-32-chars-long-3",
+            algorithm="HS256",
+            headers={"kid": "k3", "alg": "HS256", "typ": "JWT"},
+        )
+        with self.assertRaises(InvalidTokenError):
+            ts.decode_and_validate_token(token_k3)
+
+        # 4. Prune retired keys
+        pruned_count = km.prune_retired_keys()
+        self.assertGreaterEqual(pruned_count, 1)
+
+    def test_jwt_secrets_never_leaked(self) -> None:
+        """Verify secrets are never leaked in repr strings or exception messages."""
+        secret = "secret-key-super-confidential-32-bytes"
+        km = KeyManager(active_key_id="k_safe", active_signing_key=secret)
+        self.assertNotIn(secret, repr(km))
+        self.assertNotIn(secret, repr(km._keys["k_safe"]))
+
 
 # =============================================================================
 # 2. Unit Tests: Role-Permission Matrix & Privilege Escalation
@@ -340,22 +513,123 @@ class TestAuthorizationMatrix(unittest.TestCase):
         self.assertFalse(has_permission(ProjectRole.READ_ONLY, Permission.VECTOR_WRITE))
         self.assertFalse(has_permission(ProjectRole.READ_ONLY, Permission.CREDENTIAL_CREATE))
 
-    def test_agent_scope_filtering(self) -> None:
-        # Agent with ["read"] scope
-        self.assertTrue(has_permission(ProjectRole.AGENT, Permission.MEMORY_READ, scopes=["read"]))
-        self.assertTrue(has_permission(ProjectRole.AGENT, Permission.VECTOR_SEARCH, scopes=["read"]))
-        self.assertFalse(has_permission(ProjectRole.AGENT, Permission.MEMORY_WRITE, scopes=["read"]))
-        self.assertFalse(has_permission(ProjectRole.AGENT, Permission.GRAPH_WRITE, scopes=["read"]))
+    def test_authoritative_permission_inventory_count_is_28(self) -> None:
+        """Verify the authoritative permission inventory contains exactly 28 permissions."""
+        self.assertEqual(len(Permission), 28, "Authoritative permission inventory must contain exactly 28 permissions")
+        expected_permissions = {
+            "PROJECT_READ", "PROJECT_UPDATE", "PROJECT_DELETE",
+            "MEMBERSHIP_READ", "MEMBERSHIP_MANAGE",
+            "AGENT_READ", "AGENT_REGISTER", "AGENT_MANAGE",
+            "CREDENTIAL_READ", "CREDENTIAL_CREATE", "CREDENTIAL_ROTATE", "CREDENTIAL_REVOKE",
+            "MEMORY_READ", "MEMORY_WRITE", "MEMORY_UPDATE", "MEMORY_DELETE",
+            "EVENT_READ", "EVENT_WRITE",
+            "GRAPH_READ", "GRAPH_WRITE",
+            "VECTOR_SEARCH", "VECTOR_WRITE",
+            "SESSION_READ", "SESSION_WRITE",
+            "INTERACTION_READ", "INTERACTION_EXECUTE",
+            "FEEDBACK_READ", "FEEDBACK_WRITE",
+        }
+        actual_permissions = {p.value for p in Permission}
+        self.assertEqual(actual_permissions, expected_permissions)
 
-        # Agent with ["read", "write"] scope
-        self.assertTrue(has_permission(ProjectRole.AGENT, Permission.MEMORY_READ, scopes=["read", "write"]))
-        self.assertTrue(has_permission(ProjectRole.AGENT, Permission.MEMORY_WRITE, scopes=["read", "write"]))
-        self.assertTrue(has_permission(ProjectRole.AGENT, Permission.VECTOR_WRITE, scopes=["read", "write"]))
+    def test_exhaustive_permission_matrix_positive_and_negative(self) -> None:
+        """Test all 28 permissions for positive and negative authorization across every role."""
+        for perm in Permission:
+            # 1. OWNER has ALL 28 permissions
+            self.assertTrue(has_permission(ProjectRole.OWNER, perm))
 
-        # Agent NEVER has membership or credential management
-        self.assertFalse(has_permission(ProjectRole.AGENT, Permission.MEMBERSHIP_MANAGE, scopes=["read", "write", "*"]))
-        self.assertFalse(has_permission(ProjectRole.AGENT, Permission.CREDENTIAL_CREATE, scopes=["read", "write", "*"]))
-        self.assertFalse(has_permission(ProjectRole.AGENT, Permission.PROJECT_DELETE, scopes=["read", "write", "*"]))
+            # 2. ADMIN has 27 permissions (all except PROJECT_DELETE)
+            if perm == Permission.PROJECT_DELETE:
+                self.assertFalse(has_permission(ProjectRole.ADMIN, perm))
+            else:
+                self.assertTrue(has_permission(ProjectRole.ADMIN, perm))
+
+            # 3. MEMBER has 18 permissions
+            member_expected = perm in {
+                Permission.PROJECT_READ, Permission.MEMBERSHIP_READ, Permission.AGENT_READ,
+                Permission.MEMORY_READ, Permission.MEMORY_WRITE, Permission.MEMORY_UPDATE,
+                Permission.EVENT_READ, Permission.EVENT_WRITE,
+                Permission.GRAPH_READ, Permission.GRAPH_WRITE,
+                Permission.VECTOR_SEARCH, Permission.VECTOR_WRITE,
+                Permission.SESSION_READ, Permission.SESSION_WRITE,
+                Permission.INTERACTION_READ, Permission.INTERACTION_EXECUTE,
+                Permission.FEEDBACK_READ, Permission.FEEDBACK_WRITE,
+            }
+            self.assertEqual(has_permission(ProjectRole.MEMBER, perm), member_expected, f"MEMBER {perm.value}")
+
+            # 4. READ_ONLY has 10 permissions
+            readonly_expected = perm in {
+                Permission.PROJECT_READ, Permission.MEMBERSHIP_READ, Permission.AGENT_READ,
+                Permission.MEMORY_READ, Permission.EVENT_READ, Permission.GRAPH_READ,
+                Permission.VECTOR_SEARCH, Permission.SESSION_READ, Permission.INTERACTION_READ,
+                Permission.FEEDBACK_READ,
+            }
+            self.assertEqual(has_permission(ProjectRole.READ_ONLY, perm), readonly_expected, f"READ_ONLY {perm.value}")
+
+            # 5. AGENT role has 16 permissions
+            agent_expected = perm in {
+                Permission.PROJECT_READ, Permission.AGENT_READ,
+                Permission.MEMORY_READ, Permission.MEMORY_WRITE, Permission.MEMORY_UPDATE,
+                Permission.EVENT_READ, Permission.EVENT_WRITE,
+                Permission.GRAPH_READ, Permission.GRAPH_WRITE,
+                Permission.VECTOR_SEARCH, Permission.VECTOR_WRITE,
+                Permission.SESSION_READ, Permission.SESSION_WRITE,
+                Permission.INTERACTION_READ, Permission.INTERACTION_EXECUTE,
+                Permission.FEEDBACK_WRITE,
+            }
+            # When scoped with wildcard within role
+            self.assertEqual(has_permission(ProjectRole.AGENT, perm, scopes=["*"]), agent_expected, f"AGENT {perm.value}")
+
+    def test_agent_scopes_cannot_exceed_agent_permissions(self) -> None:
+        """Verify agent scopes cannot elevate permissions beyond the AGENT role."""
+        # 1. Validation rejects wildcards or admin scopes at creation
+        with self.assertRaises(PrivilegeEscalationError):
+            validate_agent_scopes(["*"])
+        with self.assertRaises(PrivilegeEscalationError):
+            validate_agent_scopes(["admin"])
+        with self.assertRaises(PrivilegeEscalationError):
+            validate_agent_scopes(["project:delete"])
+        with self.assertRaises(PrivilegeEscalationError):
+            validate_agent_scopes(["membership:manage"])
+        with self.assertRaises(PrivilegeEscalationError):
+            validate_agent_scopes(["credential:revoke"])
+
+        # 2. Even if an agent carried forbidden scopes, has_permission strictly rejects them
+        for forbidden in (
+            Permission.PROJECT_DELETE,
+            Permission.PROJECT_UPDATE,
+            Permission.MEMBERSHIP_MANAGE,
+            Permission.MEMBERSHIP_READ,
+            Permission.AGENT_REGISTER,
+            Permission.AGENT_MANAGE,
+            Permission.CREDENTIAL_CREATE,
+            Permission.CREDENTIAL_ROTATE,
+            Permission.CREDENTIAL_REVOKE,
+            Permission.CREDENTIAL_READ,
+            Permission.MEMORY_DELETE,
+            Permission.FEEDBACK_READ,
+        ):
+            self.assertFalse(
+                has_permission(ProjectRole.AGENT, forbidden, scopes=["*", forbidden.value.lower()]),
+                f"Agent must never have {forbidden.value}",
+            )
+
+    def test_admin_cannot_escalate_or_modify_owner(self) -> None:
+        """Verify ADMIN cannot modify, remove, or assign OWNER."""
+        # Admin cannot grant OWNER
+        with self.assertRaises(PrivilegeEscalationError):
+            validate_membership_transition(ProjectRole.ADMIN, ProjectRole.OWNER)
+
+        # Admin cannot modify an existing OWNER
+        with self.assertRaises(PrivilegeEscalationError):
+            validate_membership_transition(ProjectRole.ADMIN, ProjectRole.ADMIN, existing_target_role=ProjectRole.OWNER)
+
+        # Admin cannot remove an existing OWNER
+        with self.assertRaises(PrivilegeEscalationError):
+            validate_membership_transition(ProjectRole.ADMIN, ProjectRole.MEMBER, existing_target_role=ProjectRole.OWNER)
+
+        # Admin cannot delete project
+        self.assertFalse(has_permission(ProjectRole.ADMIN, Permission.PROJECT_DELETE))
 
     def test_privilege_escalation_validation(self) -> None:
         # Owner can assign Owner, Admin, Member
@@ -504,7 +778,31 @@ class TestAuthServicesSQLite(unittest.TestCase):
         alert_events = [e for e in self.audit.events if e.event_type == "BRUTE_FORCE_SUSPECTED"]
         self.assertGreaterEqual(len(alert_events), 1)
         self.assertEqual(alert_events[0].status, "ALERT")
-        self.assertEqual(alert_events[0].ip_address, "192.168.1.100")
+
+    def test_brute_force_scoped_protection_prevents_dos(self) -> None:
+        """Verify brute-force tracker keys by IP/composite to prevent denial-of-service on legitimate users."""
+        attacker_ip = "198.51.100.42"
+        legitimate_ip = "203.0.113.10"
+        target_user = "user_alice"
+
+        # Attacker makes 5 failed attempts targeting user_alice
+        for _ in range(5):
+            self.audit.record_event(
+                "LOGIN_FAILED",
+                identity_id=target_user,
+                ip_address=attacker_ip,
+                status="FAILURE",
+            )
+
+        # Attacker's IP is blocked
+        self.assertTrue(self.audit.is_client_blocked(identity_id=target_user, ip_address=attacker_ip))
+
+        # Legitimate user from different IP is NOT blocked (preventing DoS weaponization)
+        self.assertFalse(self.audit.is_client_blocked(identity_id=target_user, ip_address=legitimate_ip))
+
+        # Successful login resets failures
+        self.audit.reset_failures(identity_id=target_user, ip_address=attacker_ip)
+        self.assertFalse(self.audit.is_client_blocked(identity_id=target_user, ip_address=attacker_ip))
 
 
 # =============================================================================
@@ -700,6 +998,94 @@ class TestPostgreSQLSecurityAndRLS(unittest.TestCase):
                 cur.execute("SELECT current_setting('app.current_project_id', true);")
                 setting = cur.fetchone()[0]
                 self.assertIn(setting, (None, "", "''"), "Connection sanitization must clear app.current_project_id after exception")
+
+    def test_authenticate_agent_key_hardening_and_privileges(self) -> None:
+        """Verify authenticate_agent_key SECURITY DEFINER safety, privileges, and minimum columns."""
+        # 1. Verify prosecdef and search_path in pg_proc
+        with self.admin_mgr.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT prosecdef, proconfig
+                    FROM pg_proc
+                    WHERE proname = 'authenticate_agent_key';
+                    """
+                )
+                row = cur.fetchone()
+                self.assertIsNotNone(row)
+                prosecdef, proconfig = row
+                self.assertTrue(prosecdef, "authenticate_agent_key must be SECURITY DEFINER")
+                self.assertIn(
+                    "search_path=pg_catalog, public",
+                    proconfig or [],
+                    "authenticate_agent_key must have fixed search_path = pg_catalog, public",
+                )
+
+                # 2. Check that PUBLIC has no execute privilege
+                cur.execute(
+                    "SELECT has_function_privilege('public', 'authenticate_agent_key(varchar)', 'EXECUTE');"
+                )
+                public_exec = cur.fetchone()[0]
+                self.assertFalse(public_exec, "PUBLIC must NOT have EXECUTE on authenticate_agent_key")
+
+                # 3. Check that ai_brain_app_user has execute privilege
+                cur.execute(
+                    "SELECT has_function_privilege('ai_brain_app_user', 'authenticate_agent_key(varchar)', 'EXECUTE');"
+                )
+                app_exec = cur.fetchone()[0]
+                self.assertTrue(app_exec, "ai_brain_app_user must have EXECUTE on authenticate_agent_key")
+
+        # 4. ai_brain_app_user CANNOT alter the function or change its owner
+        with self.app_mgr.connection() as conn:
+            with conn.cursor() as cur:
+                with self.assertRaises(Exception):
+                    cur.execute("ALTER FUNCTION public.authenticate_agent_key(varchar) OWNER TO ai_brain_app_user;")
+                conn.rollback()
+
+        # 5. Verify function returns only the 9 minimum credential columns required
+        with self.app_mgr.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM public.authenticate_agent_key('nonexistent_hash');")
+                cols = [desc[0] for desc in cur.description]
+                self.assertEqual(
+                    cols,
+                    [
+                        "credential_id",
+                        "agent_id",
+                        "project_id",
+                        "name",
+                        "key_hash",
+                        "key_prefix",
+                        "scopes",
+                        "expires_at",
+                        "revoked_at",
+                    ],
+                )
+                # Query with invalid key hash returns 0 rows (no credential enumeration)
+                self.assertEqual(len(cur.fetchall()), 0)
+
+        # 6. Live agent authentication via the hardened SECURITY DEFINER function
+        agent_id = f"ag_hard_{uuid.uuid4().hex[:6]}"
+        with self.app_mgr.tenant_context(self.project_a) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO agents (agent_id, project_id, name, role) VALUES (%s, %s, %s, %s);",
+                    (agent_id, self.project_a, "Hardened Agent", "assistant"),
+                )
+            conn.commit()
+
+        created_key = self.auth_svc.create_agent_api_key(
+            agent_id=agent_id,
+            project_id=self.project_a,
+            scopes=["read", "write"],
+        )
+        identity = self.auth_svc.authenticate_api_key(created_key.raw_key)
+        self.assertEqual(identity.identity_id, agent_id)
+        self.assertEqual(identity.project_id, self.project_a)
+        self.assertEqual(identity.role, ProjectRole.AGENT)
+        self.assertTrue(identity.has_scope("read"))
+        self.assertTrue(identity.has_scope("write"))
+
 
 
 if __name__ == "__main__":

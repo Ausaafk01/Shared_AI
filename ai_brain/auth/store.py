@@ -461,19 +461,34 @@ class PostgreSQLAuthStore(AuthStore):
         return cred
 
     def _row_to_cred(self, row: tuple[Any, ...]) -> AgentCredentialRecord:
-        (
-            c_id,
-            a_id,
-            p_id,
-            name,
-            k_hash,
-            k_prefix,
-            scopes_raw,
-            exp_at,
-            rev_at,
-            last_used,
-            created_at,
-        ) = row
+        if len(row) == 9:
+            (
+                c_id,
+                a_id,
+                p_id,
+                name,
+                k_hash,
+                k_prefix,
+                scopes_raw,
+                exp_at,
+                rev_at,
+            ) = row
+            last_used = None
+            created_at = datetime.now(timezone.utc)
+        else:
+            (
+                c_id,
+                a_id,
+                p_id,
+                name,
+                k_hash,
+                k_prefix,
+                scopes_raw,
+                exp_at,
+                rev_at,
+                last_used,
+                created_at,
+            ) = row
         scopes = tuple(scopes_raw if isinstance(scopes_raw, list) else json.loads(scopes_raw or "[]"))
         return AgentCredentialRecord(
             credential_id=c_id,
@@ -532,8 +547,8 @@ class PostgreSQLAuthStore(AuthStore):
                     cur.execute(
                         """
                         SELECT credential_id, agent_id, project_id, name, key_hash, key_prefix,
-                               scopes, expires_at, revoked_at, last_used_at, created_at
-                        FROM authenticate_agent_key(%s);
+                               scopes, expires_at, revoked_at
+                        FROM public.authenticate_agent_key(%s);
                         """,
                         (key_hash,),
                     )
@@ -542,7 +557,7 @@ class PostgreSQLAuthStore(AuthStore):
                     cur.execute(
                         """
                         SELECT credential_id, agent_id, project_id, name, key_hash, key_prefix,
-                               scopes, expires_at, revoked_at, last_used_at, created_at
+                               scopes, expires_at, revoked_at
                         FROM agent_credentials
                         WHERE key_hash = %s;
                         """,

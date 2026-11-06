@@ -63,8 +63,9 @@ def upgrade() -> None:
     """)
 
     # 4. Authentication lookup function with SECURITY DEFINER
+    # Safe search_path, fully-qualified table names, minimum credential information returned.
     op.execute("""
-    CREATE OR REPLACE FUNCTION authenticate_agent_key(p_key_hash VARCHAR)
+    CREATE OR REPLACE FUNCTION public.authenticate_agent_key(p_key_hash VARCHAR)
     RETURNS TABLE (
         credential_id VARCHAR(64),
         agent_id VARCHAR(64),
@@ -74,19 +75,20 @@ def upgrade() -> None:
         key_prefix VARCHAR(16),
         scopes JSONB,
         expires_at TIMESTAMPTZ,
-        revoked_at TIMESTAMPTZ,
-        last_used_at TIMESTAMPTZ,
-        created_at TIMESTAMPTZ
+        revoked_at TIMESTAMPTZ
     )
     LANGUAGE sql
+    STABLE
     SECURITY DEFINER
-    SET search_path = public
+    SET search_path = pg_catalog, public
     AS $$
-        SELECT credential_id, agent_id, project_id, name, key_hash, key_prefix,
-               scopes, expires_at, revoked_at, last_used_at, created_at
-        FROM agent_credentials
-        WHERE key_hash = p_key_hash;
+        SELECT ac.credential_id, ac.agent_id, ac.project_id, ac.name, ac.key_hash, ac.key_prefix,
+               ac.scopes, ac.expires_at, ac.revoked_at
+        FROM public.agent_credentials ac
+        WHERE ac.key_hash = p_key_hash;
     $$;
+
+    REVOKE ALL ON FUNCTION public.authenticate_agent_key(VARCHAR) FROM PUBLIC;
     """)
 
     # 5. Grants for ai_brain_app_user if role exists
@@ -97,7 +99,7 @@ def upgrade() -> None:
             GRANT ALL ON TABLE users TO ai_brain_app_user;
             GRANT ALL ON TABLE security_audit_events TO ai_brain_app_user;
             GRANT ALL ON TABLE agent_credentials TO ai_brain_app_user;
-            GRANT EXECUTE ON FUNCTION authenticate_agent_key(VARCHAR) TO ai_brain_app_user;
+            GRANT EXECUTE ON FUNCTION public.authenticate_agent_key(VARCHAR) TO ai_brain_app_user;
         END IF;
     END $$;
     """)
@@ -105,7 +107,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # 0. Drop authentication lookup function
-    op.execute("DROP FUNCTION IF EXISTS authenticate_agent_key(VARCHAR);")
+    op.execute("DROP FUNCTION IF EXISTS public.authenticate_agent_key(VARCHAR);")
 
     # 1. Drop security audit events table
     op.execute("DROP TABLE IF EXISTS security_audit_events;")

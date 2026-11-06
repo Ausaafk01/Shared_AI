@@ -3,6 +3,7 @@
 from ai_brain.auth.audit import SecurityAuditLogger, sanitize_audit_details
 from ai_brain.auth.crypto import (
     KeyManager,
+    KeyType,
     TokenService,
     generate_api_key,
     hash_api_key,
@@ -38,6 +39,7 @@ from ai_brain.auth.permissions import (
     ROLE_PERMISSIONS,
     check_scope_allows_permission,
     has_permission,
+    validate_agent_scopes,
     validate_membership_transition,
 )
 from ai_brain.auth.service import (

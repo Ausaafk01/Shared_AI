@@ -43,54 +43,54 @@ class ProjectRole(StrEnum):
 
 
 class Permission(StrEnum):
-    """Fine-grained domain permissions for AI Brain."""
-    # Project lifecycle
+    """Authoritative inventory of exactly 28 fine-grained domain permissions for AI Brain."""
+    # Project lifecycle (3)
     PROJECT_READ = "PROJECT_READ"
     PROJECT_UPDATE = "PROJECT_UPDATE"
     PROJECT_DELETE = "PROJECT_DELETE"
 
-    # Membership & RBAC administration
+    # Membership & RBAC administration (2)
     MEMBERSHIP_READ = "MEMBERSHIP_READ"
     MEMBERSHIP_MANAGE = "MEMBERSHIP_MANAGE"
 
-    # Agent registry
+    # Agent registry (3)
     AGENT_READ = "AGENT_READ"
     AGENT_REGISTER = "AGENT_REGISTER"
     AGENT_MANAGE = "AGENT_MANAGE"
 
-    # Credential lifecycle
+    # Credential lifecycle (4)
     CREDENTIAL_READ = "CREDENTIAL_READ"
     CREDENTIAL_CREATE = "CREDENTIAL_CREATE"
     CREDENTIAL_ROTATE = "CREDENTIAL_ROTATE"
     CREDENTIAL_REVOKE = "CREDENTIAL_REVOKE"
 
-    # Memory storage
+    # Memory storage (4)
     MEMORY_READ = "MEMORY_READ"
     MEMORY_WRITE = "MEMORY_WRITE"
     MEMORY_UPDATE = "MEMORY_UPDATE"
     MEMORY_DELETE = "MEMORY_DELETE"
 
-    # Event stream
+    # Event stream (2)
     EVENT_READ = "EVENT_READ"
     EVENT_WRITE = "EVENT_WRITE"
 
-    # Knowledge graph
+    # Knowledge graph (2)
     GRAPH_READ = "GRAPH_READ"
     GRAPH_WRITE = "GRAPH_WRITE"
 
-    # Vector store & search
+    # Vector store & search (2)
     VECTOR_SEARCH = "VECTOR_SEARCH"
     VECTOR_WRITE = "VECTOR_WRITE"
 
-    # Session continuity
+    # Session continuity (2)
     SESSION_READ = "SESSION_READ"
     SESSION_WRITE = "SESSION_WRITE"
 
-    # BrainLoop execution
+    # BrainLoop execution (2)
     INTERACTION_READ = "INTERACTION_READ"
     INTERACTION_EXECUTE = "INTERACTION_EXECUTE"
 
-    # Feedback & calibration
+    # Feedback & calibration (2)
     FEEDBACK_READ = "FEEDBACK_READ"
     FEEDBACK_WRITE = "FEEDBACK_WRITE"
 

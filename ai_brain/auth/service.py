@@ -31,7 +31,11 @@ from ai_brain.auth.models import (
     ProjectRole,
     UserRecord,
 )
-from ai_brain.auth.permissions import has_permission, validate_membership_transition
+from ai_brain.auth.permissions import (
+    has_permission,
+    validate_agent_scopes,
+    validate_membership_transition,
+)
 from ai_brain.auth.store import AuthStore, PostgreSQLAuthStore, SQLiteAuthStore
 from ai_brain.storage.database import DatabaseConnectionManager
 
@@ -70,6 +74,7 @@ class AuthenticationService:
         if not agent_id or not project_id:
             raise ValueError("agent_id and project_id are required")
 
+        valid_scopes = validate_agent_scopes(scopes)
         raw_key, key_prefix, key_hash = generate_api_key("agy")
         cred_id = f"cred_{uuid.uuid4().hex[:12]}"
         now = datetime.now(timezone.utc)
@@ -82,7 +87,7 @@ class AuthenticationService:
             name=name or f"Key for {agent_id}",
             key_hash=key_hash,
             key_prefix=key_prefix,
-            scopes=tuple(scopes),
+            scopes=valid_scopes,
             expires_at=expires_at,
             created_at=now,
         )

@@ -26,6 +26,19 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 
 -- ============================================================================
+-- 1b. Users (Human / User Identities)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS users (
+    user_id VARCHAR(64) PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+-- ============================================================================
 -- 2. Project Members (RBAC & User Access)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS project_members (
@@ -290,14 +303,18 @@ CREATE TABLE IF NOT EXISTS agent_credentials (
     credential_id VARCHAR(64) PRIMARY KEY,
     agent_id VARCHAR(64) NOT NULL REFERENCES agents(agent_id) ON DELETE CASCADE,
     project_id VARCHAR(64) NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL DEFAULT '',
     key_hash VARCHAR(128) NOT NULL,
+    key_prefix VARCHAR(16),
     scopes JSONB NOT NULL DEFAULT '["read", "write"]'::jsonb,
     revoked_at TIMESTAMPTZ,
     expires_at TIMESTAMPTZ,
+    last_used_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_agent_credentials_lookup ON agent_credentials(project_id, agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_credentials_hash ON agent_credentials(key_hash);
+CREATE INDEX IF NOT EXISTS idx_agent_credentials_prefix ON agent_credentials(key_prefix);
 CREATE INDEX IF NOT EXISTS idx_agent_credentials_revoked ON agent_credentials(project_id, revoked_at) WHERE revoked_at IS NULL;
 
 -- ============================================================================
@@ -371,6 +388,25 @@ CREATE TABLE IF NOT EXISTS background_tasks (
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON background_tasks(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_tasks_status_lease ON background_tasks(status, locked_until) WHERE status IN ('PENDING', 'PROCESSING');
+
+-- ============================================================================
+-- 15. Security Audit Events (Structured Audit Trail)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS security_audit_events (
+    event_id VARCHAR(64) PRIMARY KEY,
+    event_type VARCHAR(64) NOT NULL,
+    identity_id VARCHAR(64),
+    identity_type VARCHAR(32),
+    project_id VARCHAR(64),
+    action VARCHAR(64) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    details JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ip_address VARCHAR(45),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_security_audit_project ON security_audit_events(project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_security_audit_type ON security_audit_events(event_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_security_audit_identity ON security_audit_events(identity_id, created_at DESC);
 
 -- ============================================================================
 -- Row-Level Security (RLS) Configuration

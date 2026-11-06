@@ -3,7 +3,7 @@ Simulated Research Agent specialized in information gathering and research findi
 """
 
 from datetime import datetime, timezone
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Iterator, Mapping, Optional
 
 from ai_brain.agents.base import Agent
 from ai_brain.agents.models import (
@@ -81,4 +81,19 @@ class ResearchAgent(Agent):
                 f"Research findings on '{request.content}': The investigation confirms that standard specifications "
                 f"and verified architectural patterns are applicable for project '{request.project_id}'."
             )
+
+    def stream_response(
+        self,
+        context_result: InteractionContextResult,
+        request: AgentExecutionRequest,
+    ) -> Iterator[str]:
+        """Stream research findings progressively in multi-word chunks."""
+        full_text = self.generate_response(context_result, request)
+        words = full_text.split(" ")
+        chunk_size = 4
+        for i in range(0, len(words), chunk_size):
+            chunk = " ".join(words[i : i + chunk_size])
+            if i + chunk_size < len(words):
+                chunk += " "
+            yield chunk
 

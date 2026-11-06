@@ -36,6 +36,7 @@ from ai_brain.server.dependencies import (
     BrainServiceContainer,
     create_sqlite_container,
 )
+from ai_brain.server.limiter import HttpRateLimiter, RateLimitMiddleware
 from ai_brain.server.middleware import (
     BruteForceThrottleMiddleware,
     CorrelationIdMiddleware,
@@ -60,6 +61,7 @@ logger = logging.getLogger("ai_brain.server.app")
 def create_app(
     container: Optional[BrainServiceContainer] = None,
     config: Optional[AppConfig] = None,
+    limiter: Optional[HttpRateLimiter] = None,
 ) -> FastAPI:
     """Create and configure the production FastAPI application."""
     app_cfg = config or load_config_from_env()
@@ -80,8 +82,12 @@ def create_app(
     # 1. Initialize and attach service container
     resolved_container = container or create_sqlite_container(config=app_cfg)
     app.state.container = resolved_container
+    app.state.limiter = limiter
 
     # 2. Add Security & Tracing Middleware (Order: Last added runs first)
+    # General HTTP rate limiting (token bucket)
+    app.add_middleware(RateLimitMiddleware, limiter=limiter)
+
     # Brute-force throttle
     app.add_middleware(BruteForceThrottleMiddleware)
 
@@ -270,3 +276,4 @@ def create_app(
     app.openapi = custom_openapi  # type: ignore[method-assign]
 
     return app
+

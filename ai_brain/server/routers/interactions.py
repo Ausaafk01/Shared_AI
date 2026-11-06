@@ -11,6 +11,10 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
+from ai_brain.agents.models import AgentExecutionRequest
+from ai_brain.agents.simulated.coding import CodingAgent
+from ai_brain.agents.simulated.research import ResearchAgent
+from ai_brain.agents.simulated.review import ReviewAgent
 from ai_brain.auth import AuthenticatedIdentity, Permission
 from ai_brain.loop.exceptions import InputValidationError, ResponseValidationError
 from ai_brain.loop.models import (
@@ -343,28 +347,70 @@ async def stream_interaction(
     identity: AuthenticatedIdentity = Depends(require_permission(Permission.INTERACTION_EXECUTE)),
     container: BrainServiceContainer = Depends(get_container),
 ) -> StreamingResponse:
-    """Streams interaction execution via SSE, yielding real-time chunks, context tokens, and completion."""
+    """Streams interaction execution via SSE, yielding real-time progressive chunks, context tokens, and completion."""
 
     async def event_generator() -> AsyncGenerator[str, None]:
-        interaction_id = f"int_sse_{uuid.uuid4().hex[:12]}"
+        # Idempotency check: inspect if this key was already seen or completed
+        existing_record = None
+        if payload.idempotency_key:
+            existing_record = container.brain_loop.interaction_store.get_by_idempotency_key(payload.idempotency_key)
+
+        interaction_id = (
+            existing_record.interaction_id
+            if existing_record
+            else f"int_sse_{uuid.uuid4().hex[:12]}"
+        )
 
         try:
+            # Reconnection optimization: if already completed, replay cached events without duplicate writes
+            if existing_record and existing_record.status == InteractionStatus.COMPLETED:
+                yield f"event: prepare\ndata: {json.dumps({'interaction_id': interaction_id, 'status': 'PREPARING', 'replayed': True, 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
+                if await request.is_disconnected():
+                    return
+
+                tok_used = (
+                    existing_record.context_result.context_package.tokens_used
+                    if existing_record.context_result and existing_record.context_result.context_package
+                    else 0
+                )
+                items_cnt = (
+                    len(existing_record.context_result.context_package.items)
+                    if existing_record.context_result and existing_record.context_result.context_package
+                    else 0
+                )
+                yield f"event: context_delivered\ndata: {json.dumps({'interaction_id': interaction_id, 'tokens_used': tok_used, 'memories_count': items_cnt, 'prompt_context': 'Replayed cached context', 'replayed': True})}\n\n"
+                if await request.is_disconnected():
+                    return
+
+                out_text = existing_record.response.content if existing_record.response else ""
+                yield f"event: agent_chunk\ndata: {json.dumps({'interaction_id': interaction_id, 'index': 0, 'chunk': out_text, 'replayed': True})}\n\n"
+                if await request.is_disconnected():
+                    return
+
+                mem_cnt = len(existing_record.completion_result.extracted_memories) if existing_record.completion_result else 0
+                nodes_cnt = existing_record.completion_result.graph_nodes_integrated if existing_record.completion_result else 0
+                vec_cnt = existing_record.completion_result.vectors_indexed if existing_record.completion_result else 0
+                yield f"event: completion\ndata: {json.dumps({'interaction_id': interaction_id, 'status': 'COMPLETED', 'memories_extracted': mem_cnt, 'graph_nodes_created': nodes_cnt, 'vectors_indexed': vec_cnt, 'replayed': True})}\n\n"
+                yield f"event: done\ndata: {json.dumps({'interaction_id': interaction_id, 'status': 'FINISHED', 'replayed': True})}\n\n"
+                return
+
             # 1. Emit prepare event
             yield f"event: prepare\ndata: {json.dumps({'interaction_id': interaction_id, 'status': 'PREPARING', 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
             await asyncio.sleep(0.01)
 
-            # Check client disconnect
+            # Check client disconnect before preparing context
             if await request.is_disconnected():
                 logger.info("Client disconnected before context preparation for '%s'", interaction_id)
                 return
 
             # 2. Prepare Context
             stream_session_id = payload.session_id or f"sess_{uuid.uuid4().hex[:8]}"
+            agent_id = payload.agent_id or identity.identity_id
             agent_input = AgentInteractionInput(
                 interaction_id=interaction_id,
                 project_id=project_id,
                 session_id=stream_session_id,
-                agent_id=payload.agent_id or identity.identity_id,
+                agent_id=agent_id,
                 content=payload.input_text,
                 idempotency_key=payload.idempotency_key,
                 token_budget=payload.max_context_tokens,
@@ -376,7 +422,11 @@ async def stream_interaction(
 
             # 3. Emit context_delivered event
             tokens_val = prep_result.context_package.tokens_used if prep_result.context_package else 0
-            prompt_md = (prep_result.context_package.rendered_markdown or prep_result.context_package.rendered_text) if prep_result.context_package else ""
+            prompt_md = (
+                (prep_result.context_package.rendered_markdown or prep_result.context_package.rendered_text)
+                if prep_result.context_package
+                else ""
+            )
             context_data = {
                 "interaction_id": interaction_id,
                 "tokens_used": tokens_val,
@@ -386,15 +436,31 @@ async def stream_interaction(
             yield f"event: context_delivered\ndata: {json.dumps(context_data)}\n\n"
             await asyncio.sleep(0.01)
 
-            # 4. Stream response chunks
-            simulated_chunks = [
-                f"Processing task for project '{project_id}'. ",
-                f"Analyzed query '{payload.input_text[:40]}'. ",
-                "Applied persistent architectural constraints from Brain memory. ",
-                "Executed planned actions successfully with zero contradictions.",
-            ]
+            if await request.is_disconnected():
+                logger.info("Client disconnected after context delivery for '%s'", interaction_id)
+                return
+
+            # 4. Resolve agent and stream progressive chunks
+            if "research" in agent_id.lower():
+                agent = ResearchAgent(agent_id=agent_id)
+            elif "review" in agent_id.lower():
+                agent = ReviewAgent(agent_id=agent_id)
+            else:
+                agent = CodingAgent(agent_id=agent_id)
+
+            exec_req = AgentExecutionRequest(
+                project_id=project_id,
+                session_id=stream_session_id,
+                content=payload.input_text,
+                query=payload.search_query,
+                token_budget=payload.max_context_tokens,
+                retrieval_method="HYBRID",
+                idempotency_key=payload.idempotency_key,
+                metadata=payload.metadata or {},
+            )
+
             full_response = ""
-            for idx, chunk in enumerate(simulated_chunks):
+            for idx, chunk in enumerate(agent.stream_response(prep_result, exec_req)):
                 if await request.is_disconnected():
                     logger.info("Client disconnected during chunk streaming for '%s'", interaction_id)
                     return
@@ -405,14 +471,19 @@ async def stream_interaction(
                     "chunk": chunk,
                 }
                 yield f"event: agent_chunk\ndata: {json.dumps(chunk_data)}\n\n"
-                await asyncio.sleep(0.02)
+                await asyncio.sleep(0.01)
+
+            # Check client disconnect before completion commit
+            if await request.is_disconnected():
+                logger.info("Client disconnected before completion for '%s'", interaction_id)
+                return
 
             # 5. Complete interaction and extract memories
             resp_input = AgentResponseInput(
                 interaction_id=interaction_id,
                 project_id=project_id,
                 session_id=stream_session_id,
-                agent_id=payload.agent_id or identity.identity_id,
+                agent_id=agent_id,
                 content=full_response,
             )
             completion = container.brain_loop.complete_interaction(resp_input)
@@ -431,7 +502,10 @@ async def stream_interaction(
 
         except Exception as e:
             logger.error("SSE streaming failure on '%s': %s", interaction_id, e)
-            err_data = {"interaction_id": interaction_id, "error": "STREAM_ERROR", "message": str(e)}
+            safe_message = "An error occurred during streaming execution."
+            if isinstance(e, (HTTPException, ValueError)):
+                safe_message = str(e)
+            err_data = {"interaction_id": interaction_id, "error": "STREAM_ERROR", "message": safe_message}
             yield f"event: error\ndata: {json.dumps(err_data)}\n\n"
 
     return StreamingResponse(

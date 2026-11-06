@@ -53,6 +53,8 @@ import unittest
 import uuid
 from typing import Any, Dict, List, Optional
 
+from unittest.mock import AsyncMock, patch
+from starlette.requests import Request
 from fastapi.testclient import TestClient
 
 from ai_brain.auth import (
@@ -73,6 +75,7 @@ from ai_brain.auth import (
 from ai_brain.auth.store import SQLiteAuthStore
 from ai_brain.config import DatabaseConfig, StorageBackend, load_env_file
 from ai_brain.server.app import create_app
+from ai_brain.server.limiter import HttpRateLimiter
 from ai_brain.server.dependencies import (
     BrainServiceContainer,
     create_postgres_container,
@@ -591,12 +594,20 @@ class TestSessionsAndWorkflows(BaseAPITestCase):
         self.assertEqual(res_close.json()["status"], "COMPLETED")
 
     def test_multi_agent_workflow_execution(self) -> None:
-        # 1. Create standard Research -> Coding -> Review workflow
+        # 1. Negative authorization: caller with READ_ONLY (lacking INTERACTION_EXECUTE) is rejected with 403
         wf_payload = {
             "name": "Feature Implementation",
             "task_description": "Implement caching layer for retrieval results.",
             "workflow_type": "RESEARCH_CODING_REVIEW",
         }
+        res_unauthorized = self.client.post(
+            f"/api/v1/projects/{self.project_a}/workflows",
+            headers={"Authorization": f"Bearer {self.readonly_token}"},
+            json=wf_payload,
+        )
+        self.assertEqual(res_unauthorized.status_code, 403)
+
+        # 2. Positive authorization: caller with INTERACTION_EXECUTE (owner) succeeds with 201
         res_create = self.client.post(
             f"/api/v1/projects/{self.project_a}/workflows",
             headers={"Authorization": f"Bearer {self.owner_token}"},
@@ -607,15 +618,23 @@ class TestSessionsAndWorkflows(BaseAPITestCase):
         workflow_id = wf_data["workflow_id"]
         self.assertEqual(wf_data["step_count"], 3)
 
-        # 2. Get workflow
-        res_get = self.client.get(
+        # 3. Read authorization: caller with INTERACTION_READ (read-only member) can inspect workflow
+        res_get_ro = self.client.get(
             f"/api/v1/projects/{self.project_a}/workflows/{workflow_id}",
-            headers={"Authorization": f"Bearer {self.owner_token}"},
+            headers={"Authorization": f"Bearer {self.readonly_token}"},
         )
-        self.assertEqual(res_get.status_code, 200)
-        self.assertEqual(res_get.json()["workflow_id"], workflow_id)
+        self.assertEqual(res_get_ro.status_code, 200)
+        self.assertEqual(res_get_ro.json()["workflow_id"], workflow_id)
 
-        # 3. Execute workflow
+        # 4. Negative authorization: caller with READ_ONLY cannot execute workflow
+        res_exec_ro = self.client.post(
+            f"/api/v1/projects/{self.project_a}/workflows/{workflow_id}/execute",
+            headers={"Authorization": f"Bearer {self.readonly_token}"},
+            json={},
+        )
+        self.assertEqual(res_exec_ro.status_code, 403)
+
+        # 5. Positive execution: caller with INTERACTION_EXECUTE succeeds
         res_exec = self.client.post(
             f"/api/v1/projects/{self.project_a}/workflows/{workflow_id}/execute",
             headers={"Authorization": f"Bearer {self.owner_token}"},
@@ -626,6 +645,214 @@ class TestSessionsAndWorkflows(BaseAPITestCase):
         self.assertEqual(exec_data["status"], "COMPLETED")
         self.assertEqual(len(exec_data["completed_steps"]), 3)
         self.assertIsNotNone(exec_data["final_output"])
+
+
+class TestHttpRateLimiting(unittest.TestCase):
+    """Test in-process bounded HTTP rate limiter (Token Bucket, IP resolution, LRU eviction)."""
+
+    def setUp(self) -> None:
+        self.container = create_sqlite_container(db_path=":memory:")
+        # Low capacity (5 authenticated rpm, 3 unauthenticated rpm) for deterministic testing
+        self.limiter = HttpRateLimiter(
+            authenticated_rpm=5,
+            unauthenticated_rpm=3,
+            burst_multiplier=1.0,
+            max_buckets=5,
+            entry_ttl_seconds=1.0,
+            trusted_proxies={"127.0.0.1"},
+        )
+        self.app = create_app(container=self.container, limiter=self.limiter)
+        self.client = TestClient(self.app)
+
+        self.project_id = f"proj_lim_{uuid.uuid4().hex[:8]}"
+        self.user_id = f"user_lim_{uuid.uuid4().hex[:8]}"
+        self.container.auth_store.create_user(
+            UserRecord(user_id=self.user_id, email="lim@example.com", name="Limiter User")
+        )
+        self.container.auth_store.add_project_member(
+            ProjectMemberRecord(
+                member_id=f"mem_{uuid.uuid4().hex[:8]}",
+                project_id=self.project_id,
+                user_id=self.user_id,
+                role=ProjectRole.OWNER,
+            )
+        )
+        self.token = self.container.token_service.create_access_token(
+            subject=self.user_id,
+            identity_type=IdentityType.USER,
+            name="Limiter User",
+            scopes=["*"],
+        )
+
+    def tearDown(self) -> None:
+        self.client.close()
+        self.container.close()
+
+    def test_authenticated_rate_limit_enforcement(self) -> None:
+        headers = {"Authorization": f"Bearer {self.token}"}
+        # First request succeeds
+        res1 = self.client.get(f"/api/v1/projects/{self.project_id}/memories", headers=headers)
+        self.assertEqual(res1.status_code, 200)
+
+        # Consume remaining tokens
+        for _ in range(4):
+            self.client.get(f"/api/v1/projects/{self.project_id}/memories", headers=headers)
+
+        # Depleted bucket returns HTTP 429 with Retry-After header
+        res_blocked = self.client.get(f"/api/v1/projects/{self.project_id}/memories", headers=headers)
+        self.assertEqual(res_blocked.status_code, 429)
+        self.assertIn("Retry-After", res_blocked.headers)
+        self.assertEqual(res_blocked.json()["error"], "TOO_MANY_REQUESTS")
+
+    def test_independent_identity_rate_limit_buckets(self) -> None:
+        headers1 = {"Authorization": f"Bearer {self.token}"}
+        for _ in range(5):
+            self.client.get(f"/api/v1/projects/{self.project_id}/memories", headers=headers1)
+        res_blocked = self.client.get(f"/api/v1/projects/{self.project_id}/memories", headers=headers1)
+        self.assertEqual(res_blocked.status_code, 429)
+
+        # User 2 has separate bucket and is NOT throttled by User 1's consumption
+        user2_id = f"user2_{uuid.uuid4().hex[:8]}"
+        self.container.auth_store.create_user(
+            UserRecord(user_id=user2_id, email="user2@example.com", name="User 2")
+        )
+        self.container.auth_store.add_project_member(
+            ProjectMemberRecord(
+                member_id=f"mem2_{uuid.uuid4().hex[:8]}",
+                project_id=self.project_id,
+                user_id=user2_id,
+                role=ProjectRole.OWNER,
+            )
+        )
+        token2 = self.container.token_service.create_access_token(
+            subject=user2_id,
+            identity_type=IdentityType.USER,
+            name="User 2",
+        )
+        res_user2 = self.client.get(
+            f"/api/v1/projects/{self.project_id}/memories",
+            headers={"Authorization": f"Bearer {token2}"},
+        )
+        self.assertEqual(res_user2.status_code, 200)
+
+    def test_untrusted_vs_trusted_proxy_ip_resolution(self) -> None:
+        # Request with untrusted proxy does not spoof client IP
+        limiter_untrusted = HttpRateLimiter(
+            unauthenticated_rpm=10,
+            trusted_proxies=set(),
+        )
+        scope_mock = {
+            "type": "http",
+            "client": ("127.0.0.1", 12345),
+            "headers": [(b"x-forwarded-for", b"203.0.113.1, 10.0.0.1")],
+        }
+        req_untrusted = Request(scope_mock)
+        resolved_ip = limiter_untrusted.resolve_client_ip(req_untrusted)
+        self.assertEqual(resolved_ip, "127.0.0.1")
+
+        # When proxy is in trusted_proxies, X-Forwarded-For is respected
+        limiter_trusted = HttpRateLimiter(
+            unauthenticated_rpm=10,
+            trusted_proxies={"127.0.0.1"},
+        )
+        resolved_trusted_ip = limiter_trusted.resolve_client_ip(req_untrusted)
+        self.assertEqual(resolved_trusted_ip, "203.0.113.1")
+
+    def test_bucket_capacity_bounding_and_eviction(self) -> None:
+        bounded_limiter = HttpRateLimiter(max_buckets=2, entry_ttl_seconds=60.0)
+
+        def make_req(ip: str) -> Request:
+            return Request({"type": "http", "client": (ip, 12345), "headers": []})
+
+        bounded_limiter.check(make_req("10.0.0.1"))
+        bounded_limiter.check(make_req("10.0.0.2"))
+        self.assertEqual(bounded_limiter.active_bucket_count(), 2)
+
+        # Adding a 3rd evicts the oldest bucket, bounding storage to max_buckets
+        bounded_limiter.check(make_req("10.0.0.3"))
+        self.assertLessEqual(bounded_limiter.active_bucket_count(), 2)
+
+
+class TestServerSentEventsStreaming(BaseAPITestCase):
+    """Dedicated test suite verifying progressive SSE streaming, client disconnect cancellation, and idempotency."""
+
+    def test_progressive_chunk_delivery(self) -> None:
+        stream_payload = {
+            "input_text": "Implement secure authentication with PostgreSQL and OAuth 2.0",
+            "search_query": "PostgreSQL authentication",
+            "agent_id": "agent-coder",
+        }
+        res = self.client.post(
+            f"/api/v1/projects/{self.project_a}/interactions/stream",
+            headers={"Authorization": f"Bearer {self.owner_token}"},
+            json=stream_payload,
+        )
+        self.assertEqual(res.status_code, 200)
+
+        chunks: List[str] = []
+        events: List[str] = []
+        for line in res.text.split("\n"):
+            line = line.strip()
+            if line.startswith("event: "):
+                events.append(line.replace("event: ", "").strip())
+            elif line.startswith("data: ") and events and events[-1] == "agent_chunk":
+                payload = json.loads(line.replace("data: ", "").strip())
+                chunks.append(payload["chunk"])
+
+        # Must have delivered multiple progressive chunks (not a fabricated single chunk)
+        self.assertGreater(len(chunks), 1)
+        full_streamed_response = "".join(chunks)
+        self.assertIn("PostgreSQL", full_streamed_response)
+
+    def test_idempotency_key_reconnection_no_duplicate_writes(self) -> None:
+        idem_key = f"sse_idem_{uuid.uuid4().hex[:8]}"
+        payload = {
+            "input_text": "Setup PostgreSQL database connection pooling",
+            "idempotency_key": idem_key,
+            "agent_id": "agent-coder",
+        }
+
+        # 1. First execution
+        res1 = self.client.post(
+            f"/api/v1/projects/{self.project_a}/interactions/stream",
+            headers={"Authorization": f"Bearer {self.owner_token}"},
+            json=payload,
+        )
+        self.assertEqual(res1.status_code, 200)
+
+        initial_memory_count = self.container.memory_store.count(project_id=self.project_a)
+
+        # 2. Reconnection with same idempotency key
+        res2 = self.client.post(
+            f"/api/v1/projects/{self.project_a}/interactions/stream",
+            headers={"Authorization": f"Bearer {self.owner_token}"},
+            json=payload,
+        )
+        self.assertEqual(res2.status_code, 200)
+        self.assertIn('"replayed": true', res2.text)
+
+        # 3. Verify zero duplicate memory extractions or writes occurred
+        after_memory_count = self.container.memory_store.count(project_id=self.project_a)
+        self.assertEqual(initial_memory_count, after_memory_count)
+
+    def test_client_disconnect_cancellation(self) -> None:
+        with patch("starlette.requests.Request.is_disconnected", new_callable=AsyncMock) as mock_disc:
+            # Client drops connection after context delivery
+            mock_disc.side_effect = [False, False, True, True, True, True]
+
+            stream_payload = {
+                "input_text": "Transient interaction aborted on client disconnect",
+                "idempotency_key": f"disc_{uuid.uuid4().hex[:8]}",
+            }
+            res = self.client.post(
+                f"/api/v1/projects/{self.project_a}/interactions/stream",
+                headers={"Authorization": f"Bearer {self.owner_token}"},
+                json=stream_payload,
+            )
+            self.assertEqual(res.status_code, 200)
+            # The completion event was not emitted because client disconnected before completion
+            self.assertNotIn("event: completion", res.text)
+            self.assertNotIn("event: done", res.text)
 
 
 class TestPostgresAPIIntegration(unittest.TestCase):

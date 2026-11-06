@@ -2,7 +2,7 @@
 Simulated Coding Agent specialized in software development and technical decisions.
 """
 
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Iterator, Mapping, Optional
 
 from ai_brain.agents.base import Agent
 from ai_brain.agents.models import (
@@ -83,4 +83,19 @@ class CodingAgent(Agent):
                 f"Implementation plan for '{request.content}': We decided to adopt modular architecture "
                 f"with strict typing and automated test suites for project '{request.project_id}'."
             )
+
+    def stream_response(
+        self,
+        context_result: InteractionContextResult,
+        request: AgentExecutionRequest,
+    ) -> Iterator[str]:
+        """Stream implementation plan progressively in multi-word chunks."""
+        full_text = self.generate_response(context_result, request)
+        words = full_text.split(" ")
+        chunk_size = 4
+        for i in range(0, len(words), chunk_size):
+            chunk = " ".join(words[i : i + chunk_size])
+            if i + chunk_size < len(words):
+                chunk += " "
+            yield chunk
 

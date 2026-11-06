@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 import logging
 import time
-from typing import Any, List, Mapping, Optional
+from typing import Any, Iterator, List, Mapping, Optional
 
 from ai_brain.agents.exceptions import (
     AgentExecutionError,
@@ -120,6 +120,19 @@ class Agent(ABC):
         Must be implemented by simulated agents or provider adapters.
         """
         pass
+
+    def stream_response(
+        self,
+        context_result: InteractionContextResult,
+        request: AgentExecutionRequest,
+    ) -> Iterator[str]:
+        """
+        Stream response chunks progressively from the agent given assembled context.
+        
+        Default implementation yields the complete response from generate_response as a single chunk.
+        Streaming-capable agents or provider adapters override this to yield progressive token/word chunks.
+        """
+        yield self.generate_response(context_result, request)
 
     def complete_interaction(
         self,

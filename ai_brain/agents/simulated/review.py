@@ -2,7 +2,7 @@
 Simulated Review Agent specialized in reviewing outputs, identifying errors, and detecting contradictions.
 """
 
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Iterator, Mapping, Optional
 
 from ai_brain.agents.base import Agent
 from ai_brain.agents.models import (
@@ -94,4 +94,19 @@ class ReviewAgent(Agent):
                 f"Review verdict ({grounding}): The implementation proposal for '{request.content}' adheres to "
                 f"established project standards. No conflicting architectural patterns detected."
             )
+
+    def stream_response(
+        self,
+        context_result: InteractionContextResult,
+        request: AgentExecutionRequest,
+    ) -> Iterator[str]:
+        """Stream review verdict progressively in multi-word chunks."""
+        full_text = self.generate_response(context_result, request)
+        words = full_text.split(" ")
+        chunk_size = 4
+        for i in range(0, len(words), chunk_size):
+            chunk = " ".join(words[i : i + chunk_size])
+            if i + chunk_size < len(words):
+                chunk += " "
+            yield chunk
 

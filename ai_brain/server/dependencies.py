@@ -14,7 +14,11 @@ from fastapi import Depends, Header, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from ai_brain.agents.collaboration.workflow import CollaborationEngine
-from ai_brain.server.idempotency import IdempotencyManager
+from ai_brain.server.idempotency import (
+    IdempotencyManager,
+    PostgreSQLIdempotencyCoordinator,
+    SQLiteIdempotencyCoordinator,
+)
 from ai_brain.server.limiter import HttpRateLimiter
 from ai_brain.agents.sessions.manager import SessionManager
 from ai_brain.agents.sessions.models import SessionRecord
@@ -128,6 +132,7 @@ class BrainServiceContainer:
             self.interaction_store,
             self.memory_store,
             self.vector_store,
+            self.idempotency_manager,
         ):
             if comp and hasattr(comp, "close"):
                 try:
@@ -194,6 +199,9 @@ def create_sqlite_container(
     session_manager = SessionManager(store=session_store, event_store=event_store)
     collaboration_engine = CollaborationEngine()
 
+    idempotency_coordinator = SQLiteIdempotencyCoordinator(db_path)
+    idempotency_manager = IdempotencyManager(coordinator=idempotency_coordinator)
+
     return BrainServiceContainer(
         config=app_cfg,
         db_manager=None,
@@ -215,6 +223,7 @@ def create_sqlite_container(
         brain_loop=brain_loop,
         session_manager=session_manager,
         collaboration_engine=collaboration_engine,
+        idempotency_manager=idempotency_manager,
     )
 
 
@@ -279,6 +288,9 @@ def create_postgres_container(
     session_manager = SessionManager(store=session_store, event_store=event_store)
     collaboration_engine = CollaborationEngine()
 
+    idempotency_coordinator = PostgreSQLIdempotencyCoordinator(db_manager)
+    idempotency_manager = IdempotencyManager(coordinator=idempotency_coordinator)
+
     return BrainServiceContainer(
         config=app_cfg,
         db_manager=db_manager,
@@ -300,6 +312,7 @@ def create_postgres_container(
         brain_loop=brain_loop,
         session_manager=session_manager,
         collaboration_engine=collaboration_engine,
+        idempotency_manager=idempotency_manager,
     )
 
 

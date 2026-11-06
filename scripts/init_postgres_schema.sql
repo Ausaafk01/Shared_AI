@@ -519,6 +519,32 @@ CREATE POLICY background_tasks_tenant_isolation ON background_tasks
     WITH CHECK (project_id = NULLIF(current_setting('app.current_project_id', true), ''));
 
 -- ============================================================================
+-- 15. Idempotency Reservations (Distributed Concurrency, Leases & Fencing)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS idempotency_reservations (
+    project_id VARCHAR(64) NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    idempotency_key VARCHAR(128) NOT NULL,
+    interaction_id VARCHAR(64) NOT NULL,
+    owner_id VARCHAR(128) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'IN_PROGRESS',
+    fencing_token INT NOT NULL DEFAULT 1,
+    lease_expires_at TIMESTAMPTZ NOT NULL,
+    heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (project_id, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_idempotency_res_status ON idempotency_reservations(project_id, status);
+CREATE INDEX IF NOT EXISTS idx_idempotency_res_lease ON idempotency_reservations(project_id, lease_expires_at);
+
+ALTER TABLE idempotency_reservations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE idempotency_reservations FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS idempotency_reservations_tenant_isolation ON idempotency_reservations;
+CREATE POLICY idempotency_reservations_tenant_isolation ON idempotency_reservations
+    USING (project_id = NULLIF(current_setting('app.current_project_id', true), ''))
+    WITH CHECK (project_id = NULLIF(current_setting('app.current_project_id', true), ''));
+
+-- ============================================================================
 -- 16. Security Definer Helper Functions
 -- ============================================================================
 -- Authenticate agent key without tenant context, returning only minimum credential information.
@@ -553,6 +579,7 @@ BEGIN
         GRANT ALL ON TABLE users TO ai_brain_app_user;
         GRANT ALL ON TABLE security_audit_events TO ai_brain_app_user;
         GRANT ALL ON TABLE agent_credentials TO ai_brain_app_user;
+        GRANT ALL ON TABLE idempotency_reservations TO ai_brain_app_user;
         GRANT EXECUTE ON FUNCTION public.authenticate_agent_key(VARCHAR) TO ai_brain_app_user;
     END IF;
 END $$;

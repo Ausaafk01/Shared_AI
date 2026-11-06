@@ -32,6 +32,7 @@ from ai_brain.server.idempotency import (
     IdempotencyManager,
     IdempotencyReservation,
     IdempotencyStatus,
+    StaleFencingTokenError,
 )
 from ai_brain.server.schemas import (
     ContextItemDTO,
@@ -375,8 +376,8 @@ async def stream_interaction(
             input_content=payload.input_text,
             interaction_store=container.interaction_store,
         )
-        interaction_id = reservation.interaction_id
         existing_record = reservation.existing_record
+        interaction_id = existing_record.interaction_id if existing_record else reservation.interaction_id
 
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
@@ -414,6 +415,11 @@ async def stream_interaction(
 
             def _mark_interrupted(reason: str) -> None:
                 logger.info("Marking interaction '%s' as INTERRUPTED: %s", interaction_id, reason)
+                if reservation is not None:
+                    try:
+                        reservation.mark_interrupted(reason)
+                    except Exception as e:
+                        logger.warning("Failed to mark reservation interrupted: %s", e)
                 rec = container.brain_loop.interaction_store.get(interaction_id)
                 if rec and rec.status not in (InteractionStatus.COMPLETED, InteractionStatus.PARTIAL_SUCCESS):
                     failed_rec = InteractionRecord(
@@ -509,6 +515,19 @@ async def stream_interaction(
                 if await request.is_disconnected():
                     _mark_interrupted(f"Client disconnected during chunk streaming (chunk {idx})")
                     return
+
+                # Heartbeat lease renewal
+                if reservation is not None:
+                    try:
+                        reservation.heartbeat()
+                    except StaleFencingTokenError as e:
+                        logger.warning("Lease lost or fencing token obsolete during chunk %d: %s", idx, e)
+                        _mark_interrupted(f"Lease lost: {e}")
+                        safe_message = f"StaleFencingTokenError: {e}"
+                        err_data = {"interaction_id": interaction_id, "error": "FENCING_ERROR", "message": safe_message}
+                        yield f"event: error\ndata: {json.dumps(err_data)}\n\n"
+                        return
+
                 full_response += chunk
                 chunk_data = {
                     "interaction_id": interaction_id,
@@ -522,6 +541,18 @@ async def stream_interaction(
             if await request.is_disconnected():
                 _mark_interrupted("Client disconnected before completion commit")
                 return
+
+            # Atomically commit completion reservation with fencing token validation
+            if reservation is not None:
+                try:
+                    reservation.commit_completion()
+                except StaleFencingTokenError as e:
+                    logger.warning("Fencing token check failed before completion: %s", e)
+                    _mark_interrupted(f"Fencing token obsolete: {e}")
+                    safe_message = f"StaleFencingTokenError: {e}"
+                    err_data = {"interaction_id": interaction_id, "error": "FENCING_ERROR", "message": safe_message}
+                    yield f"event: error\ndata: {json.dumps(err_data)}\n\n"
+                    return
 
             # 5. Complete interaction and extract memories
             resp_input = AgentResponseInput(

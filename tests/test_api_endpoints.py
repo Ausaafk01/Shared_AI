@@ -47,6 +47,7 @@ Covers:
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import json
 import os
@@ -57,8 +58,15 @@ from typing import Any, Dict, List, Optional
 
 from unittest.mock import AsyncMock, patch
 from starlette.requests import Request
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from ai_brain.server.idempotency import (
+    IdempotencyStatus,
+    PostgreSQLIdempotencyCoordinator,
+    SQLiteIdempotencyCoordinator,
+    StaleFencingTokenError,
+)
 from ai_brain.loop.models import AgentInteractionInput, InteractionRecord, InteractionStatus
 
 from ai_brain.auth import (
@@ -95,7 +103,7 @@ ADMIN_PG_URL = os.environ.get(
 )
 
 
-def _check_postgres_live() -> tuple[bool, str, Optional[DatabaseConnectionManager]]:
+def _check_postgres_live(close_after: bool = False) -> tuple[bool, str, Optional[DatabaseConnectionManager]]:
     cfg = DatabaseConfig(
         backend=StorageBackend.POSTGRES,
         database_url=ADMIN_PG_URL,
@@ -111,10 +119,16 @@ def _check_postgres_live() -> tuple[bool, str, Optional[DatabaseConnectionManage
             cur.execute("SELECT version();")
             ver = cur.fetchone()
         mgr.return_connection(conn)
+        if close_after:
+            mgr.close()
+            return True, str(ver[0] if ver else "unknown"), None
         return True, str(ver[0] if ver else "unknown"), mgr
     except Exception as e:
         mgr.close()
         return False, f"PostgreSQL unavailable: {e}", None
+
+
+_IS_PG_LIVE, _, _ = _check_postgres_live(close_after=True)
 
 
 class BaseAPITestCase(unittest.TestCase):
@@ -999,12 +1013,14 @@ class TestServerSentEventsStreaming(BaseAPITestCase):
             "agent_id": "agent-coder",
         }
 
-        # Reserve key actively in manager to simulate ongoing execution
-        scoped_key = f"{self.project_a}:{idem_key}"
-        self.container.idempotency_manager._active_reservations[scoped_key] = {
-            "start_mono": time.monotonic(),
-            "interaction_id": "int_concurrent_test",
-        }
+        # Actively reserve key in database to simulate ongoing worker execution
+        active_res = self.container.idempotency_manager.reserve(
+            project_id=self.project_a,
+            idempotency_key=idem_key,
+            input_content=payload["input_text"],
+            interaction_store=self.container.interaction_store,
+            lease_seconds=30.0,
+        )
 
         try:
             # Second concurrent request with the same key arrives while first is active
@@ -1019,7 +1035,7 @@ class TestServerSentEventsStreaming(BaseAPITestCase):
             err_msg = resp_body.get("message") or resp_body.get("detail", "")
             self.assertIn("currently IN_PROGRESS", err_msg)
         finally:
-            self.container.idempotency_manager.release_active(scoped_key)
+            active_res.release()
 
     def test_zero_partial_memory_writes_when_operation_abandoned(self) -> None:
         idem_key = f"abandoned_{uuid.uuid4().hex[:8]}"
@@ -1200,6 +1216,332 @@ class TestPostgresAPIIntegration(unittest.TestCase):
         )
         self.assertEqual(res_query.status_code, 200)
         self.assertGreaterEqual(res_query.json()["count"], 1)
+
+
+@unittest.skipUnless(_IS_PG_LIVE, "Live PostgreSQL required for distributed idempotency tests")
+class TestPostgreSQLDistributedIdempotency(unittest.TestCase):
+    """Verifies durable, cross-process idempotency coordination on live PostgreSQL."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        live, msg, _ = _check_postgres_live(close_after=True)
+        if not live:
+            raise unittest.SkipTest(f"Live PostgreSQL unavailable: {msg}")
+
+    def setUp(self) -> None:
+        self.project_id = f"proj_pg_idem_{uuid.uuid4().hex[:8]}"
+        self.user_id = f"user_pg_idem_{uuid.uuid4().hex[:8]}"
+
+        cfg1 = DatabaseConfig(backend=StorageBackend.POSTGRES, database_url=ADMIN_PG_URL, pool_size=5, pool_timeout=3.0)
+        cfg2 = DatabaseConfig(backend=StorageBackend.POSTGRES, database_url=ADMIN_PG_URL, pool_size=5, pool_timeout=3.0)
+        self.mgr1 = DatabaseConnectionManager(cfg1)
+        self.mgr2 = DatabaseConnectionManager(cfg2)
+
+        self.container1 = create_postgres_container(self.mgr1)
+        self.container2 = create_postgres_container(self.mgr2)
+        self.app1 = create_app(container=self.container1)
+        self.app2 = create_app(container=self.container2)
+        self.client1 = TestClient(self.app1)
+        self.client2 = TestClient(self.app2)
+
+        # Setup user and project membership in PostgreSQL auth store
+        self.container1.auth_store.create_user(UserRecord(user_id=self.user_id, email=f"{self.user_id}@example.com", name="PG Idem User"))
+        self.container1.auth_store.add_project_member(ProjectMemberRecord(member_id=f"mem_pg_{uuid.uuid4().hex[:8]}", project_id=self.project_id, user_id=self.user_id, role=ProjectRole.OWNER))
+        self.token = self.container1.token_service.create_access_token(
+            subject=self.user_id,
+            identity_type=IdentityType.USER,
+            name="PG Idem User",
+            scopes=["*"],
+        )
+
+    def tearDown(self) -> None:
+        self.client1.close()
+        self.client2.close()
+        self.container1.close()
+        self.container2.close()
+
+    def test_01_two_independent_connections_same_reservation_one_winner(self) -> None:
+        """1 & 4: Two independent connections attempting the same reservation: only one obtains ownership."""
+        idem_key = f"key_race_{uuid.uuid4().hex[:8]}"
+        coord1 = self.container1.idempotency_manager.coordinator
+        coord2 = self.container2.idempotency_manager.coordinator
+
+        # Worker 1 reserves successfully
+        res1 = coord1.reserve(
+            project_id=self.project_id,
+            idempotency_key=idem_key,
+            owner_id="worker_alpha",
+            lease_seconds=5.0,
+            interaction_store=self.container1.interaction_store,
+            input_content="Concurrent reservation attempt",
+        )
+        self.assertEqual(res1.status, IdempotencyStatus.NEW)
+        self.assertEqual(res1.fencing_token, 1)
+
+        # Worker 2 attempts concurrent reservation with same key -> rejected with 409 Conflict
+        with self.assertRaises(HTTPException) as ctx:
+            coord2.reserve(
+                project_id=self.project_id,
+                idempotency_key=idem_key,
+                owner_id="worker_beta",
+                lease_seconds=5.0,
+                interaction_store=self.container2.interaction_store,
+                input_content="Concurrent reservation attempt",
+            )
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertIn("currently IN_PROGRESS", ctx.exception.detail)
+        res1.release()
+
+    def test_02_concurrent_requests_through_separate_worker_instances(self) -> None:
+        """2, 3 & 4: Concurrent HTTP requests through separate worker/client instances: only one winner."""
+        idem_key = f"http_race_{uuid.uuid4().hex[:8]}"
+        payload = {
+            "input_text": "Concurrent stream execution across separate worker replicas",
+            "idempotency_key": idem_key,
+            "agent_id": "agent-coder",
+        }
+
+        def send_request(client: TestClient) -> Any:
+            return client.post(
+                f"/api/v1/projects/{self.project_id}/interactions/stream",
+                headers={"Authorization": f"Bearer {self.token}"},
+                json=payload,
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            fut1 = executor.submit(send_request, self.client1)
+            fut2 = executor.submit(send_request, self.client2)
+            res1 = fut1.result()
+            res2 = fut2.result()
+
+        # Exactly one must succeed (200 OK), the other rejected (409 Conflict)
+        statuses = sorted([res1.status_code, res2.status_code])
+        self.assertEqual(statuses, [200, 409], f"Expected [200, 409], got {statuses}")
+
+    def test_05_live_lease_not_reclaimed_when_heartbeats_continue(self) -> None:
+        """5: A live lease is NOT reclaimed after original lease interval when heartbeats continue."""
+        idem_key = f"live_hb_{uuid.uuid4().hex[:8]}"
+        coord1 = self.container1.idempotency_manager.coordinator
+        coord2 = self.container2.idempotency_manager.coordinator
+
+        # Worker 1 reserves with 0.8s lease
+        res1 = coord1.reserve(
+            project_id=self.project_id,
+            idempotency_key=idem_key,
+            owner_id="worker_live",
+            lease_seconds=0.8,
+            interaction_store=self.container1.interaction_store,
+            input_content="Heartbeat lease protection test",
+        )
+
+        # Worker 1 sends heartbeats across a 1.2s window (exceeding original 0.8s lease)
+        for _ in range(4):
+            time.sleep(0.3)
+            res1.heartbeat(lease_seconds=0.8)
+
+        # Worker 2 attempts to claim while Worker 1 is still actively heartbeating -> 409 Conflict
+        with self.assertRaises(HTTPException) as ctx:
+            coord2.reserve(
+                project_id=self.project_id,
+                idempotency_key=idem_key,
+                owner_id="worker_intruder",
+                lease_seconds=1.0,
+                interaction_store=self.container2.interaction_store,
+                input_content="Heartbeat lease protection test",
+            )
+        self.assertEqual(ctx.exception.status_code, 409)
+        res1.release()
+
+    def test_06_expired_lease_reclaimed_after_heartbeat_failure(self) -> None:
+        """6: An expired lease CAN be reclaimed after heartbeat failure / worker crash."""
+        idem_key = f"exp_hb_{uuid.uuid4().hex[:8]}"
+        coord1 = self.container1.idempotency_manager.coordinator
+        coord2 = self.container2.idempotency_manager.coordinator
+
+        # Worker 1 reserves with short lease (0.5s) and abandons it (stops heartbeating)
+        res1 = coord1.reserve(
+            project_id=self.project_id,
+            idempotency_key=idem_key,
+            owner_id="worker_crashed",
+            lease_seconds=0.5,
+            interaction_store=self.container1.interaction_store,
+            input_content="Expired lease reclamation test",
+        )
+        self.assertEqual(res1.fencing_token, 1)
+
+        # Wait for lease to expire
+        time.sleep(0.7)
+
+        # Worker 2 arrives and successfully reclaims the expired lease
+        res2 = coord2.reserve(
+            project_id=self.project_id,
+            idempotency_key=idem_key,
+            owner_id="worker_reclaimer",
+            lease_seconds=2.0,
+            interaction_store=self.container2.interaction_store,
+            input_content="Expired lease reclamation test",
+        )
+        self.assertEqual(res2.status, IdempotencyStatus.INTERRUPTED)
+        # Fencing token is monotonically incremented
+        self.assertEqual(res2.fencing_token, 2)
+        res2.release()
+
+    def test_07_obsolete_fencing_token_cannot_commit_completion_or_memories(self) -> None:
+        """7: A zombie worker with an obsolete fencing token cannot commit completion or extracted memories."""
+        idem_key = f"fence_guard_{uuid.uuid4().hex[:8]}"
+        coord1 = self.container1.idempotency_manager.coordinator
+        coord2 = self.container2.idempotency_manager.coordinator
+
+        # Worker 1 gets lease (fencing_token=1)
+        res1 = coord1.reserve(
+            project_id=self.project_id,
+            idempotency_key=idem_key,
+            owner_id="worker_zombie",
+            lease_seconds=0.5,
+            interaction_store=self.container1.interaction_store,
+            input_content="Fencing guard test",
+        )
+        self.assertEqual(res1.fencing_token, 1)
+
+        # Lease expires
+        time.sleep(0.7)
+
+        # Worker 2 reclaims (fencing_token=2)
+        res2 = coord2.reserve(
+            project_id=self.project_id,
+            idempotency_key=idem_key,
+            owner_id="worker_active",
+            lease_seconds=5.0,
+            interaction_store=self.container2.interaction_store,
+            input_content="Fencing guard test",
+        )
+        self.assertEqual(res2.fencing_token, 2)
+
+        # Zombie Worker 1 wakes up and attempts to commit completion -> REJECTED by fencing token check
+        with self.assertRaises(StaleFencingTokenError):
+            res1.commit_completion()
+
+        # Zombie Worker 1 attempts heartbeat -> REJECTED
+        with self.assertRaises(StaleFencingTokenError):
+            res1.heartbeat()
+
+        # Legitimate Worker 2 can commit completion cleanly
+        res2.commit_completion()
+        self.assertEqual(res2.status, IdempotencyStatus.COMPLETED)
+
+    def test_08_reclaimed_operation_completes_without_duplicate_writes(self) -> None:
+        """8 & 9: Reclaimed operation completes with exactly one set of memories, graph, and events."""
+        idem_key = f"reclaim_uniq_{uuid.uuid4().hex[:8]}"
+        payload = {
+            "input_text": "Setup PostgreSQL database connection pooling for single completion test",
+            "idempotency_key": idem_key,
+            "agent_id": "agent-coder",
+        }
+
+        # 1. First run disconnects mid-stream
+        with patch("starlette.requests.Request.is_disconnected", new_callable=AsyncMock) as mock_disc:
+            mock_disc.side_effect = [False, False, False, True, True, True]
+            res_abort = self.client1.post(
+                f"/api/v1/projects/{self.project_id}/interactions/stream",
+                headers={"Authorization": f"Bearer {self.token}"},
+                json=payload,
+            )
+            self.assertEqual(res_abort.status_code, 200)
+
+        # Zero memories written during aborted run
+        self.assertEqual(self.container1.memory_store.count(project_id=self.project_id), 0)
+
+        # 2. Separate worker instance resumes with same key and runs to completion
+        res_done = self.client2.post(
+            f"/api/v1/projects/{self.project_id}/interactions/stream",
+            headers={"Authorization": f"Bearer {self.token}"},
+            json=payload,
+        )
+        self.assertEqual(res_done.status_code, 200)
+        self.assertIn("event: completion", res_done.text)
+
+        # Exactly 1 memory persisted in PostgreSQL
+        self.assertEqual(self.container1.memory_store.count(project_id=self.project_id), 1)
+
+        # 3. Third request replays cached result without duplicate memory writes
+        res_replay = self.client1.post(
+            f"/api/v1/projects/{self.project_id}/interactions/stream",
+            headers={"Authorization": f"Bearer {self.token}"},
+            json=payload,
+        )
+        self.assertEqual(res_replay.status_code, 200)
+        self.assertIn('"replayed": true', res_replay.text)
+        self.assertEqual(self.container1.memory_store.count(project_id=self.project_id), 1)
+
+
+class TestSQLiteDistributedIdempotency(unittest.TestCase):
+    """Verifies that SQLite offline idempotency coordinator preserves identical semantics."""
+
+    def setUp(self) -> None:
+        self.project_id = f"proj_sq_idem_{uuid.uuid4().hex[:8]}"
+        self.coord = SQLiteIdempotencyCoordinator(":memory:")
+        self.container = create_sqlite_container(":memory:")
+
+    def tearDown(self) -> None:
+        self.coord.close()
+        self.container.close()
+
+    def test_sqlite_concurrent_reservation_rejected(self) -> None:
+        idem_key = f"sq_race_{uuid.uuid4().hex[:8]}"
+        res1 = self.coord.reserve(
+            project_id=self.project_id,
+            idempotency_key=idem_key,
+            owner_id="worker_sq_1",
+            lease_seconds=5.0,
+            interaction_store=self.container.interaction_store,
+            input_content="SQLite concurrency test",
+        )
+        self.assertEqual(res1.status, IdempotencyStatus.NEW)
+        self.assertEqual(res1.fencing_token, 1)
+
+        with self.assertRaises(HTTPException) as ctx:
+            self.coord.reserve(
+                project_id=self.project_id,
+                idempotency_key=idem_key,
+                owner_id="worker_sq_2",
+                lease_seconds=5.0,
+                interaction_store=self.container.interaction_store,
+                input_content="SQLite concurrency test",
+            )
+        self.assertEqual(ctx.exception.status_code, 409)
+        res1.release()
+
+    def test_sqlite_heartbeat_renewal_and_expired_reclamation(self) -> None:
+        idem_key = f"sq_exp_{uuid.uuid4().hex[:8]}"
+        res1 = self.coord.reserve(
+            project_id=self.project_id,
+            idempotency_key=idem_key,
+            owner_id="worker_sq_1",
+            lease_seconds=0.4,
+            interaction_store=self.container.interaction_store,
+            input_content="SQLite heartbeat test",
+        )
+        time.sleep(0.5)
+
+        # Worker 2 reclaims expired lease
+        res2 = self.coord.reserve(
+            project_id=self.project_id,
+            idempotency_key=idem_key,
+            owner_id="worker_sq_2",
+            lease_seconds=2.0,
+            interaction_store=self.container.interaction_store,
+            input_content="SQLite heartbeat test",
+        )
+        self.assertEqual(res2.status, IdempotencyStatus.INTERRUPTED)
+        self.assertEqual(res2.fencing_token, 2)
+
+        # Worker 1 obsolete fencing token fails
+        with self.assertRaises(StaleFencingTokenError):
+            res1.commit_completion()
+
+        # Worker 2 completes cleanly
+        res2.commit_completion()
+        self.assertEqual(res2.status, IdempotencyStatus.COMPLETED)
 
 
 if __name__ == "__main__":

@@ -28,6 +28,7 @@ Guarantees:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import asyncio
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 import logging
@@ -36,7 +37,7 @@ from pathlib import Path
 import sqlite3
 import threading
 import time
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, TypeVar, Union
 import uuid
 
 from fastapi import HTTPException, status
@@ -46,6 +47,25 @@ from ai_brain.loop.storage.base import InteractionStore
 from ai_brain.storage.database import DatabaseConnectionManager
 
 logger = logging.getLogger("ai_brain.server.idempotency")
+
+T = TypeVar("T")
+
+
+def _resolve_existing_record(
+    store: InteractionStore, idempotency_key: str, project_id: str, interaction_id: Optional[str] = None
+) -> Optional[InteractionRecord]:
+    """Helper to safely retrieve an existing interaction record by key or ID with project scope."""
+    rec: Optional[InteractionRecord] = None
+    try:
+        rec = store.get_by_idempotency_key(idempotency_key, project_id=project_id)
+    except TypeError:
+        rec = store.get_by_idempotency_key(idempotency_key)
+    if rec is None and interaction_id:
+        try:
+            rec = store.get(interaction_id, project_id=project_id)
+        except TypeError:
+            rec = store.get(interaction_id)
+    return rec
 
 
 class StaleFencingTokenError(Exception):
@@ -58,6 +78,146 @@ class IdempotencyStatus(StrEnum):
     NEW = "NEW"
     COMPLETED = "COMPLETED"
     INTERRUPTED = "INTERRUPTED"
+
+
+class AsyncHeartbeatHandle:
+    """Manages asynchronous periodic lease heartbeats running independently while execution is active."""
+
+    def __init__(
+        self,
+        reservation: "IdempotencyReservation",
+        interval: float,
+        lease_seconds: float,
+    ) -> None:
+        self.reservation = reservation
+        self.interval = max(0.05, interval)
+        self.lease_seconds = lease_seconds
+        self._stop_event = asyncio.Event()
+        self._task: Optional[asyncio.Task] = None
+        self._is_stopped = False
+        self._ownership_lost = False
+        self._last_error: Optional[Exception] = None
+
+    @property
+    def is_alive(self) -> bool:
+        return self._task is not None and not self._task.done()
+
+    @property
+    def ownership_lost(self) -> bool:
+        return self._ownership_lost
+
+    async def _loop(self) -> None:
+        while not self._stop_event.is_set():
+            try:
+                await asyncio.wait_for(self._stop_event.wait(), timeout=self.interval)
+                break
+            except asyncio.TimeoutError:
+                pass
+
+            if self._stop_event.is_set() or self.reservation.is_terminal:
+                break
+
+            try:
+                await asyncio.to_thread(self.reservation.heartbeat, self.lease_seconds)
+            except StaleFencingTokenError as e:
+                logger.warning(
+                    "Async heartbeat detected lost ownership for key '%s': %s",
+                    self.reservation.idempotency_key,
+                    e,
+                )
+                self._ownership_lost = True
+                self._last_error = e
+                self.reservation.mark_lost(str(e))
+                break
+            except Exception as e:
+                logger.warning(
+                    "Async heartbeat renewal error for key '%s': %s",
+                    self.reservation.idempotency_key,
+                    e,
+                )
+
+    def start(self) -> None:
+        if self._task is None and not self._is_stopped:
+            self._task = asyncio.create_task(self._loop())
+
+    async def stop(self) -> None:
+        if self._is_stopped:
+            return
+        self._is_stopped = True
+        self._stop_event.set()
+        if self._task is not None and not self._task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(self._task), timeout=2.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                self._task.cancel()
+
+
+class BackgroundHeartbeatHandle:
+    """Manages thread-based periodic lease heartbeats running independently while execution is active."""
+
+    def __init__(
+        self,
+        reservation: "IdempotencyReservation",
+        interval: float,
+        lease_seconds: float,
+    ) -> None:
+        self.reservation = reservation
+        self.interval = max(0.05, interval)
+        self.lease_seconds = lease_seconds
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        self._is_stopped = False
+        self._ownership_lost = False
+        self._last_error: Optional[Exception] = None
+
+    @property
+    def is_alive(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    @property
+    def ownership_lost(self) -> bool:
+        return self._ownership_lost
+
+    def _loop(self) -> None:
+        while not self._stop_event.is_set():
+            stopped = self._stop_event.wait(timeout=self.interval)
+            if stopped or self.reservation.is_terminal:
+                break
+            try:
+                self.reservation.heartbeat(self.lease_seconds)
+            except StaleFencingTokenError as e:
+                logger.warning(
+                    "Thread heartbeat detected lost ownership for key '%s': %s",
+                    self.reservation.idempotency_key,
+                    e,
+                )
+                self._ownership_lost = True
+                self._last_error = e
+                self.reservation.mark_lost(str(e))
+                break
+            except Exception as e:
+                logger.warning(
+                    "Thread heartbeat renewal error for key '%s': %s",
+                    self.reservation.idempotency_key,
+                    e,
+                )
+
+    def start(self) -> None:
+        if self._thread is None and not self._is_stopped:
+            self._thread = threading.Thread(
+                target=self._loop,
+                name=f"heartbeat_{self.reservation.idempotency_key}",
+                daemon=True,
+            )
+            self._thread.start()
+
+    def stop(self, timeout: float = 2.0) -> None:
+        if self._is_stopped:
+            return
+        self._is_stopped = True
+        self._stop_event.set()
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout=timeout)
 
 
 class IdempotencyReservation:
@@ -75,6 +235,7 @@ class IdempotencyReservation:
         status: IdempotencyStatus,
         existing_record: Optional[InteractionRecord],
         coordinator: "BaseIdempotencyCoordinator",
+        lease_seconds: float = 10.0,
     ) -> None:
         self.scoped_key = scoped_key
         self.project_id = project_id
@@ -85,60 +246,124 @@ class IdempotencyReservation:
         self.status = status
         self.existing_record = existing_record
         self.coordinator = coordinator
+        self.lease_seconds = lease_seconds
         self._released = False
+        self._lost = False
+        self._lost_reason = ""
+        self._lock = threading.RLock()
+        self._active_async_heartbeat: Optional[AsyncHeartbeatHandle] = None
+        self._active_bg_heartbeat: Optional[BackgroundHeartbeatHandle] = None
 
-    def heartbeat(self, lease_seconds: float = 10.0) -> None:
+    @property
+    def is_terminal(self) -> bool:
+        with self._lock:
+            return self._released or self._lost or self.status == IdempotencyStatus.COMPLETED
+
+    def mark_lost(self, reason: str) -> None:
+        with self._lock:
+            self._lost = True
+            self._lost_reason = reason
+
+    def heartbeat(self, lease_seconds: Optional[float] = None) -> None:
         """Renew active lease. Raises StaleFencingTokenError if lease was lost."""
-        if self._released or self.status == IdempotencyStatus.COMPLETED:
-            return
-        ok = self.coordinator.heartbeat(
-            project_id=self.project_id,
-            idempotency_key=self.idempotency_key,
-            fencing_token=self.fencing_token,
-            lease_seconds=lease_seconds,
-        )
-        if not ok:
-            raise StaleFencingTokenError(
-                f"Heartbeat failed for key '{self.idempotency_key}': lease expired or reclaimed by another worker."
+        with self._lock:
+            if self._released or self.status == IdempotencyStatus.COMPLETED:
+                return
+            if self._lost:
+                raise StaleFencingTokenError(
+                    f"Heartbeat failed for key '{self.idempotency_key}': {self._lost_reason or 'lease lost or reclaimed'}."
+                )
+            dur = lease_seconds if lease_seconds is not None else self.lease_seconds
+            ok = self.coordinator.heartbeat(
+                project_id=self.project_id,
+                idempotency_key=self.idempotency_key,
+                fencing_token=self.fencing_token,
+                lease_seconds=dur,
             )
+            if not ok:
+                self.mark_lost("lease expired or reclaimed by another worker")
+                raise StaleFencingTokenError(
+                    f"Heartbeat failed for key '{self.idempotency_key}': lease expired or reclaimed by another worker."
+                )
+
+    def execute_fenced_completion(self, completion_fn: Callable[[], T]) -> T:
+        """Atomically validate fencing token, execute completion side effects, and transition to COMPLETED."""
+        with self._lock:
+            if self._released:
+                raise StaleFencingTokenError("Cannot complete a released reservation.")
+            if self._lost:
+                raise StaleFencingTokenError(
+                    f"Cannot commit completion for key '{self.idempotency_key}': {self._lost_reason or 'fencing token is obsolete'}."
+                )
+            if self.status == IdempotencyStatus.COMPLETED:
+                return completion_fn()
+
+            # Execute transactional fenced completion via coordinator
+            result = self.coordinator.execute_fenced_completion(
+                project_id=self.project_id,
+                idempotency_key=self.idempotency_key,
+                fencing_token=self.fencing_token,
+                completion_fn=completion_fn,
+            )
+            self.status = IdempotencyStatus.COMPLETED
+            return result
 
     def commit_completion(self) -> None:
         """Atomically transition state to COMPLETED. Raises StaleFencingTokenError if reclaimed."""
-        if self._released:
-            raise StaleFencingTokenError("Cannot complete a released reservation.")
-        ok = self.coordinator.complete(
-            project_id=self.project_id,
-            idempotency_key=self.idempotency_key,
-            fencing_token=self.fencing_token,
-        )
-        if not ok:
-            raise StaleFencingTokenError(
-                f"Cannot commit completion for key '{self.idempotency_key}': fencing token {self.fencing_token} is obsolete."
-            )
-        self.status = IdempotencyStatus.COMPLETED
+        self.execute_fenced_completion(lambda: None)
 
     def mark_interrupted(self, reason: str = "") -> None:
         """Atomically mark reservation as INTERRUPTED."""
-        if self._released or self.status == IdempotencyStatus.COMPLETED:
-            return
-        self.coordinator.mark_interrupted(
-            project_id=self.project_id,
-            idempotency_key=self.idempotency_key,
-            fencing_token=self.fencing_token,
-            reason=reason,
-        )
-        self.status = IdempotencyStatus.INTERRUPTED
+        with self._lock:
+            if self._released or self.status == IdempotencyStatus.COMPLETED:
+                return
+            self.coordinator.mark_interrupted(
+                project_id=self.project_id,
+                idempotency_key=self.idempotency_key,
+                fencing_token=self.fencing_token,
+                reason=reason,
+            )
+            self.status = IdempotencyStatus.INTERRUPTED
 
     def release(self) -> None:
         """Release active reservation if not completed."""
-        if not self._released:
-            self._released = True
-            if self.status != IdempotencyStatus.COMPLETED:
-                self.coordinator.release(
-                    project_id=self.project_id,
-                    idempotency_key=self.idempotency_key,
-                    fencing_token=self.fencing_token,
-                )
+        with self._lock:
+            if not self._released:
+                self._released = True
+                if self._active_bg_heartbeat is not None:
+                    self._active_bg_heartbeat.stop()
+                if self.status != IdempotencyStatus.COMPLETED and not self._lost:
+                    self.coordinator.release(
+                        project_id=self.project_id,
+                        idempotency_key=self.idempotency_key,
+                        fencing_token=self.fencing_token,
+                    )
+
+    def start_async_heartbeat(
+        self,
+        interval: Optional[float] = None,
+        lease_seconds: Optional[float] = None,
+    ) -> AsyncHeartbeatHandle:
+        """Start periodic asynchronous heartbeat task running independently while execution is active."""
+        dur = lease_seconds if lease_seconds is not None else self.lease_seconds
+        intv = interval if interval is not None else max(0.1, dur / 3.0)
+        handle = AsyncHeartbeatHandle(self, interval=intv, lease_seconds=dur)
+        handle.start()
+        self._active_async_heartbeat = handle
+        return handle
+
+    def start_background_heartbeat(
+        self,
+        interval: Optional[float] = None,
+        lease_seconds: Optional[float] = None,
+    ) -> BackgroundHeartbeatHandle:
+        """Start periodic background heartbeat thread running independently while execution is active."""
+        dur = lease_seconds if lease_seconds is not None else self.lease_seconds
+        intv = interval if interval is not None else max(0.1, dur / 3.0)
+        handle = BackgroundHeartbeatHandle(self, interval=intv, lease_seconds=dur)
+        handle.start()
+        self._active_bg_heartbeat = handle
+        return handle
 
     def __enter__(self) -> "IdempotencyReservation":
         return self
@@ -211,6 +436,18 @@ class BaseIdempotencyCoordinator(ABC):
         pass
 
     @abstractmethod
+    def execute_fenced_completion(
+        self,
+        *,
+        project_id: str,
+        idempotency_key: str,
+        fencing_token: int,
+        completion_fn: Callable[[], Any],
+    ) -> Any:
+        """Atomically validate fencing token, execute completion side effects, and mark COMPLETED."""
+        pass
+
+    @abstractmethod
     def clear(self) -> None:
         """Clear all reservations (test fixture helper)."""
         pass
@@ -263,7 +500,7 @@ class PostgreSQLIdempotencyCoordinator(BaseIdempotencyCoordinator):
 
                 if row is None:
                     # Check if interaction store already has an interaction for this key
-                    existing_record = interaction_store.get_by_idempotency_key(idempotency_key)
+                    existing_record = _resolve_existing_record(interaction_store, idempotency_key, project_id)
                     if existing_record is not None:
                         new_iid = existing_record.interaction_id
                         res_status = IdempotencyStatus.INTERRUPTED
@@ -292,6 +529,7 @@ class PostgreSQLIdempotencyCoordinator(BaseIdempotencyCoordinator):
                         status=res_status,
                         existing_record=existing_record,
                         coordinator=self,
+                        lease_seconds=lease_seconds,
                     )
 
                 (existing_iid, current_owner, current_status, fencing_token, current_lease_exp, _) = row
@@ -299,7 +537,7 @@ class PostgreSQLIdempotencyCoordinator(BaseIdempotencyCoordinator):
                     current_lease_exp = current_lease_exp.replace(tzinfo=timezone.utc)
 
                 # Validate input payload against existing interaction record
-                existing_record = interaction_store.get_by_idempotency_key(idempotency_key)
+                existing_record = _resolve_existing_record(interaction_store, idempotency_key, project_id, existing_iid)
                 if existing_record is not None:
                     if existing_record.project_id != project_id:
                         raise HTTPException(
@@ -327,6 +565,7 @@ class PostgreSQLIdempotencyCoordinator(BaseIdempotencyCoordinator):
                         status=IdempotencyStatus.COMPLETED,
                         existing_record=existing_record,
                         coordinator=self,
+                        lease_seconds=lease_seconds,
                     )
 
                 # Case B: Currently IN_PROGRESS
@@ -378,6 +617,7 @@ class PostgreSQLIdempotencyCoordinator(BaseIdempotencyCoordinator):
                             status=IdempotencyStatus.INTERRUPTED,
                             existing_record=existing_record,
                             coordinator=self,
+                            lease_seconds=lease_seconds,
                         )
 
                 # Case C: Previous execution was INTERRUPTED or FAILED -> retry
@@ -405,6 +645,7 @@ class PostgreSQLIdempotencyCoordinator(BaseIdempotencyCoordinator):
                     status=IdempotencyStatus.INTERRUPTED,
                     existing_record=existing_record,
                     coordinator=self,
+                    lease_seconds=lease_seconds,
                 )
 
     def heartbeat(
@@ -425,7 +666,8 @@ class PostgreSQLIdempotencyCoordinator(BaseIdempotencyCoordinator):
                     SET lease_expires_at = %s,
                         heartbeat_at = %s,
                         updated_at = %s
-                    WHERE project_id = %s AND idempotency_key = %s AND fencing_token = %s;
+                    WHERE project_id = %s AND idempotency_key = %s
+                      AND fencing_token = %s AND status = 'IN_PROGRESS';
                     """,
                     (new_exp, now_utc, now_utc, project_id, idempotency_key, fencing_token),
                 )
@@ -446,11 +688,77 @@ class PostgreSQLIdempotencyCoordinator(BaseIdempotencyCoordinator):
                     UPDATE idempotency_reservations
                     SET status = 'COMPLETED',
                         updated_at = %s
-                    WHERE project_id = %s AND idempotency_key = %s AND fencing_token = %s;
+                    WHERE project_id = %s AND idempotency_key = %s
+                      AND fencing_token = %s AND status = 'IN_PROGRESS';
                     """,
                     (now_utc, project_id, idempotency_key, fencing_token),
                 )
                 return cur.rowcount > 0
+
+    def execute_fenced_completion(
+        self,
+        *,
+        project_id: str,
+        idempotency_key: str,
+        fencing_token: int,
+        completion_fn: Callable[[], T],
+    ) -> T:
+        scoped_key = f"{project_id}:{idempotency_key}"
+        now_utc = datetime.now(timezone.utc)
+
+        with self.db_manager.scoped_transaction(project_id) as conn:
+            with conn.cursor() as cur:
+                # 1. Acquire transaction-level advisory lock to serialize with competing workers
+                cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s));", (scoped_key,))
+
+                # 2. Verify fencing token and status under FOR UPDATE
+                cur.execute(
+                    """
+                    SELECT fencing_token, status
+                    FROM idempotency_reservations
+                    WHERE project_id = %s AND idempotency_key = %s
+                    FOR UPDATE;
+                    """,
+                    (project_id, idempotency_key),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    raise StaleFencingTokenError(
+                        f"Reservation for key '{idempotency_key}' does not exist in project '{project_id}'."
+                    )
+
+                current_token, current_status = row
+                if current_token != fencing_token:
+                    raise StaleFencingTokenError(
+                        f"Cannot commit completion for key '{idempotency_key}': fencing token {fencing_token} "
+                        f"is obsolete (current token is {current_token})."
+                    )
+
+                if current_status not in ("IN_PROGRESS", "COMPLETED"):
+                    raise StaleFencingTokenError(
+                        f"Cannot commit completion for key '{idempotency_key}': status is '{current_status}'."
+                    )
+
+            # 3. Execute completion side effects within the active scoped transaction
+            result = completion_fn()
+
+            # 4. Mark reservation COMPLETED only after side effects have succeeded
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE idempotency_reservations
+                    SET status = 'COMPLETED',
+                        updated_at = %s
+                    WHERE project_id = %s AND idempotency_key = %s AND fencing_token = %s;
+                    """,
+                    (now_utc, project_id, idempotency_key, fencing_token),
+                )
+                if cur.rowcount == 0:
+                    raise StaleFencingTokenError(
+                        f"Failed to commit completion for key '{idempotency_key}': fencing token {fencing_token} was modified."
+                    )
+
+            return result
 
     def mark_interrupted(
         self,
@@ -599,7 +907,7 @@ class SQLiteIdempotencyCoordinator(BaseIdempotencyCoordinator):
                 row = cur.fetchone()
 
                 if row is None:
-                    existing_record = interaction_store.get_by_idempotency_key(idempotency_key)
+                    existing_record = _resolve_existing_record(interaction_store, idempotency_key, project_id)
                     if existing_record is not None:
                         new_iid = existing_record.interaction_id
                         res_status = IdempotencyStatus.INTERRUPTED
@@ -629,6 +937,7 @@ class SQLiteIdempotencyCoordinator(BaseIdempotencyCoordinator):
                         status=res_status,
                         existing_record=existing_record,
                         coordinator=self,
+                        lease_seconds=lease_seconds,
                     )
 
                 (existing_iid, current_owner, current_status, fencing_token, exp_iso, _) = row
@@ -636,7 +945,7 @@ class SQLiteIdempotencyCoordinator(BaseIdempotencyCoordinator):
                 if current_lease_exp.tzinfo is None:
                     current_lease_exp = current_lease_exp.replace(tzinfo=timezone.utc)
 
-                existing_record = interaction_store.get_by_idempotency_key(idempotency_key)
+                existing_record = _resolve_existing_record(interaction_store, idempotency_key, project_id, existing_iid)
                 if existing_record is not None:
                     if existing_record.project_id != project_id:
                         conn.execute("ROLLBACK;")
@@ -666,6 +975,7 @@ class SQLiteIdempotencyCoordinator(BaseIdempotencyCoordinator):
                         status=IdempotencyStatus.COMPLETED,
                         existing_record=existing_record,
                         coordinator=self,
+                        lease_seconds=lease_seconds,
                     )
 
                 if current_status == "IN_PROGRESS":
@@ -704,6 +1014,7 @@ class SQLiteIdempotencyCoordinator(BaseIdempotencyCoordinator):
                             status=IdempotencyStatus.INTERRUPTED,
                             existing_record=existing_record,
                             coordinator=self,
+                            lease_seconds=lease_seconds,
                         )
 
                 new_token = fencing_token + 1
@@ -731,6 +1042,7 @@ class SQLiteIdempotencyCoordinator(BaseIdempotencyCoordinator):
                     status=IdempotencyStatus.INTERRUPTED,
                     existing_record=existing_record,
                     coordinator=self,
+                    lease_seconds=lease_seconds,
                 )
             except Exception:
                 try:
@@ -763,7 +1075,8 @@ class SQLiteIdempotencyCoordinator(BaseIdempotencyCoordinator):
                     SET lease_expires_at = ?,
                         heartbeat_at = ?,
                         updated_at = ?
-                    WHERE project_id = ? AND idempotency_key = ? AND fencing_token = ?;
+                    WHERE project_id = ? AND idempotency_key = ?
+                      AND fencing_token = ? AND status = 'IN_PROGRESS';
                     """,
                     (lease_exp, now_iso, now_iso, project_id, idempotency_key, fencing_token),
                 )
@@ -789,11 +1102,79 @@ class SQLiteIdempotencyCoordinator(BaseIdempotencyCoordinator):
                     UPDATE idempotency_reservations
                     SET status = 'COMPLETED',
                         updated_at = ?
-                    WHERE project_id = ? AND idempotency_key = ? AND fencing_token = ?;
+                    WHERE project_id = ? AND idempotency_key = ?
+                      AND fencing_token = ? AND status = 'IN_PROGRESS';
                     """,
                     (now_iso, project_id, idempotency_key, fencing_token),
                 )
                 return cur.rowcount > 0
+            finally:
+                if self._shared_conn is None:
+                    conn.close()
+
+    def execute_fenced_completion(
+        self,
+        *,
+        project_id: str,
+        idempotency_key: str,
+        fencing_token: int,
+        completion_fn: Callable[[], T],
+    ) -> T:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                conn.execute("BEGIN IMMEDIATE;")
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT fencing_token, status
+                    FROM idempotency_reservations
+                    WHERE project_id = ? AND idempotency_key = ?;
+                    """,
+                    (project_id, idempotency_key),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    conn.execute("ROLLBACK;")
+                    raise StaleFencingTokenError(
+                        f"Reservation for key '{idempotency_key}' does not exist in project '{project_id}'."
+                    )
+
+                current_token, current_status = row
+                if current_token != fencing_token:
+                    conn.execute("ROLLBACK;")
+                    raise StaleFencingTokenError(
+                        f"Cannot commit completion for key '{idempotency_key}': fencing token {fencing_token} "
+                        f"is obsolete (current token is {current_token})."
+                    )
+
+                if current_status not in ("IN_PROGRESS", "COMPLETED"):
+                    conn.execute("ROLLBACK;")
+                    raise StaleFencingTokenError(
+                        f"Cannot commit completion for key '{idempotency_key}': status is '{current_status}'."
+                    )
+
+                # Execute completion side effects
+                result = completion_fn()
+
+                cur.execute(
+                    """
+                    UPDATE idempotency_reservations
+                    SET status = 'COMPLETED',
+                        updated_at = ?
+                    WHERE project_id = ? AND idempotency_key = ? AND fencing_token = ?;
+                    """,
+                    (now_iso, project_id, idempotency_key, fencing_token),
+                )
+                conn.execute("COMMIT;")
+                return result
+            except Exception:
+                try:
+                    conn.execute("ROLLBACK;")
+                except Exception:
+                    pass
+                raise
             finally:
                 if self._shared_conn is None:
                     conn.close()

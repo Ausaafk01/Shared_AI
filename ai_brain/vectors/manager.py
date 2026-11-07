@@ -2,6 +2,7 @@
 VectorMemoryManager orchestrating memory lifecycle integration, version tracking, and search.
 """
 
+import hashlib
 import logging
 from typing import List, Optional, Sequence, Set, Union
 
@@ -93,6 +94,8 @@ class VectorMemoryManager:
 
         # 4. Create and store vector record
         record_id = f"vec:{project_id}:{memory_id}:v{version}:{model_id}"
+        if len(record_id) > 64:
+            record_id = f"vec_{hashlib.sha256(record_id.encode('utf-8')).hexdigest()[:48]}"
         record = VectorRecord.create(
             record_id=record_id,
             memory_id=memory_id,

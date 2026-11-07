@@ -1473,6 +1473,285 @@ class TestPostgreSQLDistributedIdempotency(unittest.TestCase):
         self.assertIn('"replayed": true', res_replay.text)
         self.assertEqual(self.container1.memory_store.count(project_id=self.project_id), 1)
 
+    def test_09_independent_heartbeat_during_silent_agent_execution(self) -> None:
+        """Requirement 1, Tests 1 & 2: Active worker produces NO output chunks for > lease interval;
+        independent heartbeat keeps lease alive; competing worker is rejected with 409 Conflict.
+        """
+        idem_key = f"silent_hb_{uuid.uuid4().hex[:8]}"
+        coord1 = self.container1.idempotency_manager.coordinator
+        coord2 = self.container2.idempotency_manager.coordinator
+
+        # Worker 1 reserves with 0.6s lease
+        res1 = coord1.reserve(
+            project_id=self.project_id,
+            idempotency_key=idem_key,
+            owner_id="worker_silent",
+            lease_seconds=0.6,
+            interaction_store=self.container1.interaction_store,
+            input_content="Silent agent independent heartbeat test",
+        )
+        self.assertEqual(res1.fencing_token, 1)
+
+        # Start independent background heartbeat (interval = 0.15s)
+        hb1 = res1.start_background_heartbeat(interval=0.15, lease_seconds=0.6)
+        self.assertTrue(hb1.is_alive)
+
+        try:
+            # Simulate silent agent producing NO chunks for 1.1s (almost 2x original 0.6s lease)
+            time.sleep(0.4)
+            # Competing worker attempts to reclaim during silent period -> must be REJECTED (409 Conflict)
+            with self.assertRaises(HTTPException) as ctx:
+                coord2.reserve(
+                    project_id=self.project_id,
+                    idempotency_key=idem_key,
+                    owner_id="worker_competing",
+                    lease_seconds=1.0,
+                    interaction_store=self.container2.interaction_store,
+                    input_content="Silent agent independent heartbeat test",
+                )
+            self.assertEqual(ctx.exception.status_code, 409)
+
+            # Wait another 0.4s (total 0.8s elapsed, well beyond original 0.6s lease)
+            time.sleep(0.4)
+            with self.assertRaises(HTTPException) as ctx:
+                coord2.reserve(
+                    project_id=self.project_id,
+                    idempotency_key=idem_key,
+                    owner_id="worker_competing",
+                    lease_seconds=1.0,
+                    interaction_store=self.container2.interaction_store,
+                    input_content="Silent agent independent heartbeat test",
+                )
+            self.assertEqual(ctx.exception.status_code, 409)
+
+            # Worker 1 completes cleanly
+            res1.commit_completion()
+            self.assertEqual(res1.status, IdempotencyStatus.COMPLETED)
+        finally:
+            hb1.stop()
+            self.assertFalse(hb1.is_alive)
+            res1.release()
+
+    def test_10_heartbeats_stop_after_completion_and_cancellation(self) -> None:
+        """Requirement 1, Test 3: Independent heartbeat stops cleanly after completion and cancellation."""
+        idem_key_comp = f"stop_comp_{uuid.uuid4().hex[:8]}"
+        coord1 = self.container1.idempotency_manager.coordinator
+
+        res = coord1.reserve(
+            project_id=self.project_id,
+            idempotency_key=idem_key_comp,
+            owner_id="worker_stopper",
+            lease_seconds=1.0,
+            interaction_store=self.container1.interaction_store,
+            input_content="Heartbeat stop test",
+        )
+        hb = res.start_background_heartbeat(interval=0.1, lease_seconds=1.0)
+        self.assertTrue(hb.is_alive)
+
+        # Complete and stop
+        res.commit_completion()
+        hb.stop()
+        self.assertFalse(hb.is_alive)
+
+        # Test cancellation/release
+        idem_key_cancel = f"stop_canc_{uuid.uuid4().hex[:8]}"
+        res_cancel = coord1.reserve(
+            project_id=self.project_id,
+            idempotency_key=idem_key_cancel,
+            owner_id="worker_canceller",
+            lease_seconds=1.0,
+            interaction_store=self.container1.interaction_store,
+            input_content="Heartbeat cancel test",
+        )
+        hb_cancel = res_cancel.start_background_heartbeat(interval=0.1, lease_seconds=1.0)
+        self.assertTrue(hb_cancel.is_alive)
+        res_cancel.release()
+        self.assertFalse(hb_cancel.is_alive)
+
+    def test_11_worker_losing_fencing_token_cannot_renew_lease_and_aborts(self) -> None:
+        """Requirement 1, Test 4: Worker losing fencing token cannot renew lease."""
+        idem_key = f"lose_fence_{uuid.uuid4().hex[:8]}"
+        coord1 = self.container1.idempotency_manager.coordinator
+        coord2 = self.container2.idempotency_manager.coordinator
+
+        res1 = coord1.reserve(
+            project_id=self.project_id,
+            idempotency_key=idem_key,
+            owner_id="worker_slow",
+            lease_seconds=0.4,
+            interaction_store=self.container1.interaction_store,
+            input_content="Fencing token loss renewal test",
+        )
+        self.assertEqual(res1.fencing_token, 1)
+
+        # Worker 1 pauses, lease expires
+        time.sleep(0.5)
+
+        # Worker 2 reclaims lease with fencing_token = 2
+        res2 = coord2.reserve(
+            project_id=self.project_id,
+            idempotency_key=idem_key,
+            owner_id="worker_fast",
+            lease_seconds=2.0,
+            interaction_store=self.container2.interaction_store,
+            input_content="Fencing token loss renewal test",
+        )
+        self.assertEqual(res2.fencing_token, 2)
+
+        # Worker 1 attempts heartbeat renewal -> MUST FAIL with StaleFencingTokenError
+        with self.assertRaises(StaleFencingTokenError):
+            res1.heartbeat()
+
+        # Worker 1 attempts completion -> MUST FAIL with StaleFencingTokenError
+        with self.assertRaises(StaleFencingTokenError):
+            res1.commit_completion()
+
+        res2.release()
+        res1.release()
+
+    def test_12_adversarial_race_atomic_fencing_blocks_zombie_writes(self) -> None:
+        """Requirement 2, Test 1: Adversarial race: Worker A validates fencing token ->
+        Worker B reclaims with newer token -> Worker A attempts completion/memory persistence ->
+        Worker A rejected, 0 side effects committed.
+        """
+        idem_key = f"race_atomic_{uuid.uuid4().hex[:8]}"
+        coord1 = self.container1.idempotency_manager.coordinator
+        coord2 = self.container2.idempotency_manager.coordinator
+
+        # Worker A reserves key (fencing_token = 1)
+        res_a = coord1.reserve(
+            project_id=self.project_id,
+            idempotency_key=idem_key,
+            owner_id="worker_a",
+            lease_seconds=0.4,
+            interaction_store=self.container1.interaction_store,
+            input_content="Adversarial race test",
+        )
+        self.assertEqual(res_a.fencing_token, 1)
+
+        # Worker A validates fencing token initially (heartbeat succeeds)
+        res_a.heartbeat(lease_seconds=0.4)
+
+        # Worker A pauses / experiences network delay; lease expires
+        time.sleep(0.5)
+
+        # Worker B arrives and reclaims the reservation (fencing_token = 2)
+        res_b = coord2.reserve(
+            project_id=self.project_id,
+            idempotency_key=idem_key,
+            owner_id="worker_b",
+            lease_seconds=2.0,
+            interaction_store=self.container2.interaction_store,
+            input_content="Adversarial race test",
+        )
+        self.assertEqual(res_b.fencing_token, 2)
+
+        # Worker A wakes up and attempts completion & memory persistence
+        memory_written_by_a = False
+        def worker_a_completion_action() -> None:
+            nonlocal memory_written_by_a
+            # If transactional fencing works, this callback must NEVER be reached or committed
+            from ai_brain.memories.models import Memory
+            zombie_mem = Memory.create(
+                memory_id=f"mem_zombie_{uuid.uuid4().hex[:8]}",
+                project_id=self.project_id,
+                content="Zombie memory that must never be committed",
+                memory_type="CONCEPT",
+            )
+            self.container1.memory_store.store(zombie_mem)
+            memory_written_by_a = True
+
+        with self.assertRaises(StaleFencingTokenError):
+            res_a.execute_fenced_completion(worker_a_completion_action)
+
+        self.assertFalse(memory_written_by_a, "Worker A's completion side effects were executed!")
+        # 0 side effects committed by Worker A
+        self.assertEqual(self.container1.memory_store.count(project_id=self.project_id), 0)
+
+        # Worker B can subsequently complete cleanly
+        res_b.commit_completion()
+        self.assertEqual(res_b.status, IdempotencyStatus.COMPLETED)
+        res_a.release()
+        res_b.release()
+
+    def test_13_completion_transaction_rollback_and_subsequent_worker_b_completion(self) -> None:
+        """Requirement 2, Tests 2, 3 & 4:
+        - Completion transaction fails partway and rolls back consistently.
+        - Worker B subsequently completes successfully with exactly 1 completion, memory, graph, event record.
+        - Replay still works cleanly without duplicate writes.
+        """
+        idem_key = f"rollback_retry_{uuid.uuid4().hex[:8]}"
+        coord1 = self.container1.idempotency_manager.coordinator
+        coord2 = self.container2.idempotency_manager.coordinator
+
+        res1 = coord1.reserve(
+            project_id=self.project_id,
+            idempotency_key=idem_key,
+            owner_id="worker_fail_partway",
+            lease_seconds=0.4,
+            interaction_store=self.container1.interaction_store,
+            input_content="Completion rollback and retry test",
+        )
+
+        # 1. Worker 1 attempts completion, but fails partway inside the transaction
+        from ai_brain.memories.models import Memory
+        mem1 = Memory.create(
+            memory_id=f"mem_rb_{uuid.uuid4().hex[:8]}",
+            project_id=self.project_id,
+            content="Memory persisted right before rollback",
+            memory_type="FACT",
+        )
+
+        def failing_completion_action() -> None:
+            self.container1.memory_store.store(mem1)
+            # Simulate unexpected failure after memory write
+            raise RuntimeError("Simulated mid-completion failure")
+
+        with self.assertRaises(RuntimeError):
+            res1.execute_fenced_completion(failing_completion_action)
+
+        # Verify transaction rolled back: 0 memories in database!
+        self.assertEqual(self.container1.memory_store.count(project_id=self.project_id), 0)
+
+        # Idempotency reservation must NOT be marked COMPLETED
+        with self.mgr1.tenant_context(self.project_id) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT status FROM idempotency_reservations WHERE project_id = %s AND idempotency_key = %s;",
+                    (self.project_id, idem_key),
+                )
+                row = cur.fetchone()
+                self.assertIsNotNone(row)
+                self.assertNotEqual(row[0], "COMPLETED")
+
+        # 2. Worker 2 arrives after lease expires and completes successfully
+        time.sleep(0.5)
+        payload = {
+            "input_text": "Completion rollback and retry test",
+            "idempotency_key": idem_key,
+            "agent_id": "agent-coder",
+        }
+        res_worker2 = self.client2.post(
+            f"/api/v1/projects/{self.project_id}/interactions/stream",
+            headers={"Authorization": f"Bearer {self.token}"},
+            json=payload,
+        )
+        self.assertEqual(res_worker2.status_code, 200)
+        self.assertIn("event: completion", res_worker2.text)
+
+        # Verification of exactly 1 memory persisted
+        self.assertEqual(self.container1.memory_store.count(project_id=self.project_id), 1)
+
+        # 3. Third request replays completed interaction cleanly without duplicate writes
+        res_replay = self.client1.post(
+            f"/api/v1/projects/{self.project_id}/interactions/stream",
+            headers={"Authorization": f"Bearer {self.token}"},
+            json=payload,
+        )
+        self.assertEqual(res_replay.status_code, 200)
+        self.assertIn('"replayed": true', res_replay.text)
+        self.assertEqual(self.container1.memory_store.count(project_id=self.project_id), 1)
+
 
 class TestSQLiteDistributedIdempotency(unittest.TestCase):
     """Verifies that SQLite offline idempotency coordinator preserves identical semantics."""
@@ -1542,6 +1821,79 @@ class TestSQLiteDistributedIdempotency(unittest.TestCase):
         # Worker 2 completes cleanly
         res2.commit_completion()
         self.assertEqual(res2.status, IdempotencyStatus.COMPLETED)
+
+    def test_sqlite_independent_heartbeat_and_fencing_loss(self) -> None:
+        """SQLite parity: Independent heartbeat prevents reclamation, and stale fencing is rejected."""
+        idem_key = f"sq_indep_{uuid.uuid4().hex[:8]}"
+        res1 = self.coord.reserve(
+            project_id=self.project_id,
+            idempotency_key=idem_key,
+            owner_id="worker_sq_live",
+            lease_seconds=0.6,
+            interaction_store=self.container.interaction_store,
+            input_content="SQLite independent heartbeat test",
+        )
+        hb1 = res1.start_background_heartbeat(interval=0.15, lease_seconds=0.6)
+        self.assertTrue(hb1.is_alive)
+
+        try:
+            time.sleep(0.4)
+            # Competing worker rejected
+            with self.assertRaises(HTTPException) as ctx:
+                self.coord.reserve(
+                    project_id=self.project_id,
+                    idempotency_key=idem_key,
+                    owner_id="worker_sq_competing",
+                    lease_seconds=1.0,
+                    interaction_store=self.container.interaction_store,
+                    input_content="SQLite independent heartbeat test",
+                )
+            self.assertEqual(ctx.exception.status_code, 409)
+        finally:
+            hb1.stop()
+            self.assertFalse(hb1.is_alive)
+            res1.release()
+
+    def test_sqlite_adversarial_fencing_and_rollback_recovery(self) -> None:
+        """SQLite parity: Adversarial race blocks stale writes, and rollback allows clean retry."""
+        idem_key = f"sq_fenced_{uuid.uuid4().hex[:8]}"
+        res1 = self.coord.reserve(
+            project_id=self.project_id,
+            idempotency_key=idem_key,
+            owner_id="worker_sq_1",
+            lease_seconds=0.4,
+            interaction_store=self.container.interaction_store,
+            input_content="SQLite fenced completion test",
+        )
+        time.sleep(0.5)
+
+        # Worker 2 reclaims
+        res2 = self.coord.reserve(
+            project_id=self.project_id,
+            idempotency_key=idem_key,
+            owner_id="worker_sq_2",
+            lease_seconds=2.0,
+            interaction_store=self.container.interaction_store,
+            input_content="SQLite fenced completion test",
+        )
+        self.assertEqual(res2.fencing_token, 2)
+
+        # Worker 1 attempted execution blocked
+        side_effect_run = False
+        def dummy_action() -> None:
+            nonlocal side_effect_run
+            side_effect_run = True
+
+        with self.assertRaises(StaleFencingTokenError):
+            res1.execute_fenced_completion(dummy_action)
+        self.assertFalse(side_effect_run)
+
+        # Worker 2 completes cleanly
+        res2.execute_fenced_completion(dummy_action)
+        self.assertTrue(side_effect_run)
+        self.assertEqual(res2.status, IdempotencyStatus.COMPLETED)
+        res1.release()
+        res2.release()
 
 
 if __name__ == "__main__":

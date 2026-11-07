@@ -29,6 +29,7 @@ from ai_brain.server.dependencies import (
     require_permission,
 )
 from ai_brain.server.idempotency import (
+    AsyncHeartbeatHandle,
     IdempotencyManager,
     IdempotencyReservation,
     IdempotencyStatus,
@@ -367,6 +368,7 @@ async def stream_interaction(
     reservation: Optional[IdempotencyReservation] = None
     interaction_id = f"int_sse_{uuid.uuid4().hex[:12]}"
     existing_record: Optional[InteractionRecord] = None
+    heartbeat_handle: Optional[AsyncHeartbeatHandle] = None
 
     if payload.idempotency_key:
         idempotency_mgr: IdempotencyManager = container.idempotency_manager
@@ -378,6 +380,18 @@ async def stream_interaction(
         )
         existing_record = reservation.existing_record
         interaction_id = existing_record.interaction_id if existing_record else reservation.interaction_id
+        if existing_record is None and reservation.status == IdempotencyStatus.COMPLETED:
+            try:
+                existing_record = container.interaction_store.get(reservation.interaction_id, project_id=project_id)
+            except TypeError:
+                existing_record = container.interaction_store.get(reservation.interaction_id)
+
+        # Start periodic heartbeat renewal independently while execution is active
+        if reservation.status != IdempotencyStatus.COMPLETED:
+            heartbeat_handle = reservation.start_async_heartbeat(
+                interval=max(0.1, reservation.lease_seconds / 3.0),
+                lease_seconds=reservation.lease_seconds,
+            )
 
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
@@ -516,17 +530,18 @@ async def stream_interaction(
                     _mark_interrupted(f"Client disconnected during chunk streaming (chunk {idx})")
                     return
 
-                # Heartbeat lease renewal
-                if reservation is not None:
-                    try:
-                        reservation.heartbeat()
-                    except StaleFencingTokenError as e:
-                        logger.warning("Lease lost or fencing token obsolete during chunk %d: %s", idx, e)
-                        _mark_interrupted(f"Lease lost: {e}")
-                        safe_message = f"StaleFencingTokenError: {e}"
-                        err_data = {"interaction_id": interaction_id, "error": "FENCING_ERROR", "message": safe_message}
-                        yield f"event: error\ndata: {json.dumps(err_data)}\n\n"
-                        return
+                # Check if independent heartbeat lost ownership or lease expired
+                if heartbeat_handle is not None and heartbeat_handle.ownership_lost:
+                    logger.warning(
+                        "Lease lost or fencing token obsolete during chunk %d: %s",
+                        idx,
+                        heartbeat_handle._last_error,
+                    )
+                    _mark_interrupted(f"Lease lost: {heartbeat_handle._last_error}")
+                    safe_message = f"StaleFencingTokenError: {heartbeat_handle._last_error}"
+                    err_data = {"interaction_id": interaction_id, "error": "FENCING_ERROR", "message": safe_message}
+                    yield f"event: error\ndata: {json.dumps(err_data)}\n\n"
+                    return
 
                 full_response += chunk
                 chunk_data = {
@@ -542,10 +557,41 @@ async def stream_interaction(
                 _mark_interrupted("Client disconnected before completion commit")
                 return
 
-            # Atomically commit completion reservation with fencing token validation
+            # Check if independent heartbeat lost ownership before attempting completion
+            if heartbeat_handle is not None and heartbeat_handle.ownership_lost:
+                logger.warning(
+                    "Fencing token check failed before completion: %s",
+                    heartbeat_handle._last_error,
+                )
+                _mark_interrupted(f"Fencing token obsolete: {heartbeat_handle._last_error}")
+                safe_message = f"StaleFencingTokenError: {heartbeat_handle._last_error}"
+                err_data = {"interaction_id": interaction_id, "error": "FENCING_ERROR", "message": safe_message}
+                yield f"event: error\ndata: {json.dumps(err_data)}\n\n"
+                return
+
+            # 5. Atomically complete interaction and persist memories under transactional fencing
+            def _perform_completion() -> Any:
+                resp_input = AgentResponseInput(
+                    interaction_id=interaction_id,
+                    project_id=project_id,
+                    session_id=stream_session_id,
+                    agent_id=agent_id,
+                    content=full_response,
+                )
+                comp = container.brain_loop.complete_interaction(resp_input)
+
+                # Persist extracted memories to container memory store if configured
+                if hasattr(container, "memory_store") and container.memory_store is not None:
+                    for m in comp.extracted_memories:
+                        try:
+                            container.memory_store.store(m)
+                        except Exception as e:
+                            logger.warning("Failed to store extracted memory '%s' in memory_store: %s", m.memory_id, e)
+                return comp
+
             if reservation is not None:
                 try:
-                    reservation.commit_completion()
+                    completion = reservation.execute_fenced_completion(_perform_completion)
                 except StaleFencingTokenError as e:
                     logger.warning("Fencing token check failed before completion: %s", e)
                     _mark_interrupted(f"Fencing token obsolete: {e}")
@@ -553,24 +599,8 @@ async def stream_interaction(
                     err_data = {"interaction_id": interaction_id, "error": "FENCING_ERROR", "message": safe_message}
                     yield f"event: error\ndata: {json.dumps(err_data)}\n\n"
                     return
-
-            # 5. Complete interaction and extract memories
-            resp_input = AgentResponseInput(
-                interaction_id=interaction_id,
-                project_id=project_id,
-                session_id=stream_session_id,
-                agent_id=agent_id,
-                content=full_response,
-            )
-            completion = container.brain_loop.complete_interaction(resp_input)
-
-            # Persist extracted memories to container memory store if configured
-            if hasattr(container, "memory_store") and container.memory_store is not None:
-                for m in completion.extracted_memories:
-                    try:
-                        container.memory_store.store(m)
-                    except Exception as e:
-                        logger.warning("Failed to store extracted memory '%s' in memory_store: %s", m.memory_id, e)
+            else:
+                completion = _perform_completion()
 
             comp_data = {
                 "interaction_id": interaction_id,
@@ -591,18 +621,10 @@ async def stream_interaction(
             yield f"event: error\ndata: {json.dumps(err_data)}\n\n"
 
         finally:
+            if heartbeat_handle is not None:
+                await heartbeat_handle.stop()
             if reservation is not None:
                 reservation.release()
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
 
     return StreamingResponse(
         event_generator(),

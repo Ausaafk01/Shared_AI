@@ -10,6 +10,7 @@ Provides:
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import queue
 import threading
@@ -67,6 +68,9 @@ class DatabaseConnectionManager:
         self._all_connections: list[Any] = []
         self._lock = threading.Lock()
         self._closed = False
+        self._active_tenant_conn: contextvars.ContextVar[Optional[Any]] = contextvars.ContextVar(
+            f"_active_tenant_conn_{id(self)}", default=None
+        )
 
     @property
     def driver_available(self) -> bool:
@@ -258,16 +262,60 @@ class DatabaseConnectionManager:
         Executes `SET LOCAL app.current_project_id = %s;` within a transaction.
         In PostgreSQL, `SET LOCAL` is automatically reverted upon COMMIT or ROLLBACK.
         Upon return to pool, connection sanitization runs `RESET ALL` as defense-in-depth.
+        If an ambient scoped_transaction is active, reuses that connection and defers commit.
+        """
+        if not project_id or not isinstance(project_id, str):
+            raise ValueError("project_id must be a non-empty string.")
+
+        ambient_conn = self._active_tenant_conn.get()
+        if conn is not None:
+            active_conn = conn
+            manage_checkout = False
+            defer_commit = False
+        elif ambient_conn is not None:
+            active_conn = ambient_conn
+            manage_checkout = False
+            defer_commit = True
+        else:
+            active_conn = self.get_connection()
+            manage_checkout = True
+            defer_commit = False
+
+        try:
+            with active_conn.cursor() as cur:
+                # Use parameterized execution to prevent SQL injection in session setting
+                cur.execute("SELECT set_config('app.current_project_id', %s, true);", (project_id,))
+            yield active_conn
+            if not defer_commit:
+                active_conn.commit()
+        except Exception:
+            if not defer_commit:
+                try:
+                    active_conn.rollback()
+                except Exception:
+                    pass
+            raise
+        finally:
+            if manage_checkout:
+                self.return_connection(active_conn)
+
+    @contextmanager
+    def scoped_transaction(self, project_id: str, conn: Optional[Any] = None) -> Generator[Any, None, None]:
+        """Context manager providing an atomic multi-operation transaction scoped to a tenant.
+
+        All calls to tenant_context() within this block will reuse this connection,
+        participating in a single transaction that commits atomically on completion
+        or rolls back entirely on any error.
         """
         if not project_id or not isinstance(project_id, str):
             raise ValueError("project_id must be a non-empty string.")
 
         manage_checkout = conn is None
         active_conn = self.get_connection() if manage_checkout else conn
+        token = self._active_tenant_conn.set(active_conn)
 
         try:
             with active_conn.cursor() as cur:
-                # Use parameterized execution to prevent SQL injection in session setting
                 cur.execute("SELECT set_config('app.current_project_id', %s, true);", (project_id,))
             yield active_conn
             active_conn.commit()
@@ -278,6 +326,7 @@ class DatabaseConnectionManager:
                 pass
             raise
         finally:
+            self._active_tenant_conn.reset(token)
             if manage_checkout:
                 self.return_connection(active_conn)
 

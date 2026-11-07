@@ -235,14 +235,21 @@ def run_acceptance(clean_volumes: bool = False) -> int:
         logger.info("[Step 9] Executing worker crash-recovery during active task execution...")
         crash_idempotency_key = f"ci_crash_recovery_{int(time.time())}"
         crash_interaction_id = f"int_crash_{int(time.time())}"
+        barrier_path = "/tmp/ai_brain_test_sync_barrier"
+        proc_path = "/tmp/ai_brain_test_sync_processing"
+
+        # Arm the test-only synchronization barrier exclusively in the test harness
+        run_cmd(["docker", "compose", "exec", "-T", "worker", "rm", "-f", proc_path])
+        run_cmd(["docker", "compose", "exec", "-T", "worker", "touch", barrier_path])
+        logger.info("Test synchronization barrier armed in worker container (%s).", barrier_path)
+
         crash_payload = {
             "task_type": "interaction_execution",
             "payload": {
-                "input_text": "Task for active execution crash recovery verification.",
+                "input_text": "Active crash recovery verification: We decided to deploy PostgreSQL with automated lease recovery.",
                 "session_id": "sess_ci_crash_002",
-                "agent_id": "agent-coder",
+                "agent_id": "test-sync-blocker",
                 "interaction_id": crash_interaction_id,
-                "sleep_seconds": 3.0,  # Ensure worker is actively executing during termination
             },
             "idempotency_key": crash_idempotency_key,
         }
@@ -283,8 +290,11 @@ def run_acceptance(clean_volumes: bool = False) -> int:
         assert db_status == "PROCESSING", f"Expected PROCESSING in DB, got: {db_status}"
         logger.info("Database confirms task '%s' was abandoned in PROCESSING state by dead worker.", crash_task_id)
 
+        # Remove dead container to ensure clean /tmp filesystem without barrier file
+        run_cmd(["docker", "compose", "rm", "-f", "worker"])
+
         # Re-start replacement worker container
-        logger.info("Restarting replacement worker container...")
+        logger.info("Starting replacement worker container...")
         run_cmd(["docker", "compose", "up", "-d", "worker"])
 
         # Wait for replacement worker to reclaim task and complete it
@@ -302,24 +312,38 @@ def run_acceptance(clean_volumes: bool = False) -> int:
         assert recovered, "Replacement worker failed to recover and complete crash-recovery task"
         logger.info("Replacement worker claimed abandoned task and successfully completed it.")
 
-        # Database-backed verification of exactly-once side effects
+        # Strengthened database-backed verification of exactly-once side effects
+        # 1. Exactly one completed task
         task_db_count = query_postgres(
             f"SELECT COUNT(*) FROM background_tasks WHERE task_id = '{crash_task_id}' AND status = 'COMPLETED';"
         )
         assert task_db_count == "1", f"Expected exactly 1 completed task in DB, got: {task_db_count}"
 
+        # 2. Exactly one interaction record
         int_db_count = query_postgres(
             f"SELECT COUNT(*) FROM interactions WHERE idempotency_key = '{crash_idempotency_key}';"
         )
         assert int_db_count == "1", f"Expected exactly 1 interaction record in DB, got: {int_db_count}"
 
-        # External HTTP verification of resulting interaction
+        # 3. Exactly one corresponding set of memory side effects
+        mem_db_count = query_postgres(
+            f"SELECT COUNT(*) FROM memories WHERE content ILIKE '%automated lease recovery%';"
+        )
+        assert mem_db_count == "1", f"Expected exactly 1 memory record in DB, got: {mem_db_count}"
+
+        # 4. No duplicate event writes
+        evt_db_count = query_postgres(
+            f"SELECT COUNT(*) FROM events WHERE payload->>'idempotency_key' = '{crash_idempotency_key}';"
+        )
+        assert evt_db_count == "1", f"Expected exactly 1 event record in DB, got: {evt_db_count}"
+
+        # 5. External HTTP verification of resulting interaction
         status, int_body, _ = http_get(
             f"{API_BASE}/api/v1/projects/default/interactions/{crash_interaction_id}",
             headers=api_hdrs,
         )
         assert status == 200, f"Expected 200 retrieving interaction, got {status}"
-        logger.info("Database-backed task completion and exactly-once interaction verified.")
+        logger.info("Database-backed task completion and exactly-once side effects (task, interaction, memory, event) verified.")
 
         # 10. Database Persistence Across Container Restarts
         logger.info("[Step 10] Testing PostgreSQL data persistence across restarts...")

@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # =============================================================================
@@ -328,6 +328,15 @@ class TaskSubmitRequest(BaseModel):
     task_type: str = Field(..., min_length=1, max_length=100, description="Registered task type (e.g. interaction_execution, memory_maintenance)")
     payload: Dict[str, Any] = Field(default_factory=dict, description="Task payload dictionary")
     idempotency_key: Optional[str] = Field(default=None, min_length=1, max_length=128, description="Client idempotency key")
+
+    @field_validator("payload")
+    @classmethod
+    def validate_payload_safety(cls, v: Dict[str, Any]) -> Dict[str, Any]:
+        disallowed = {"sleep_seconds", "sleep", "delay", "delay_seconds", "pause", "pause_seconds"}
+        found = disallowed.intersection(v.keys())
+        if found:
+            raise ValueError(f"Payload contains disallowed execution delay field(s): {', '.join(sorted(found))}")
+        return v
 
 
 class TaskSubmitResponse(BaseModel):

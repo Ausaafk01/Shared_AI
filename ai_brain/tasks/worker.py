@@ -190,9 +190,9 @@ class BackgroundWorker:
         hb_interval = max(0.05, self.lease_seconds / 3.0)
 
         def _heartbeat_worker() -> None:
-            while not hb_stop.is_set():
+            while not hb_stop.is_set() and not self._stop_event.is_set():
                 stopped = hb_stop.wait(timeout=hb_interval)
-                if stopped:
+                if stopped or self._stop_event.is_set():
                     break
                 try:
                     ok = self.store.heartbeat(

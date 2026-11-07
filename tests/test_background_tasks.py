@@ -1354,6 +1354,108 @@ class TestInteractionExecutionEndToEnd(unittest.TestCase):
             pg_container.close()
             mgr.close()
 
+    def test_06_interaction_execution_active_worker_crash_and_recovery(self) -> None:
+        """Verifies active worker crash mid-execution using deterministic thread synchronization."""
+        from ai_brain.agents.simulated.sync import TestSyncBlockingAgent
+        task_store = self.container.task_store
+        task_registry = self.container.task_registry
+        idem_key = f"crash_idem_{uuid.uuid4().hex[:8]}"
+
+        started_evt = threading.Event()
+        barrier_evt = threading.Event()
+        TestSyncBlockingAgent._thread_started_event = started_evt
+        TestSyncBlockingAgent._thread_barrier_event = barrier_evt
+
+        try:
+            # 1. Submit interaction execution task with test synchronization agent
+            task = task_store.submit_task(
+                project_id=self.project_id,
+                task_type="interaction_execution",
+                payload={
+                    "input_text": "Evaluating Postgres schema recovery after crash",
+                    "agent_id": "test-sync-blocker",
+                    "idempotency_key": idem_key,
+                },
+                idempotency_key=idem_key,
+            )
+
+            # 2. Start worker 1 with a short lease (0.2s)
+            worker1 = BackgroundWorker(
+                store=task_store,
+                project_id=self.project_id,
+                registry=task_registry,
+                context=self.container,
+                worker_id="w_crash_victim",
+                poll_interval=0.02,
+                lease_seconds=0.2,
+            )
+            worker1.start()
+
+            # Wait deterministically for worker 1 to enter active processing
+            self.assertTrue(started_evt.wait(timeout=5.0), "Worker 1 failed to enter generate_response")
+
+            # Verify task is locked in PROCESSING state
+            in_flight = task_store.get_task(self.project_id, task.task_id)
+            self.assertIsNotNone(in_flight)
+            self.assertEqual(in_flight.status, TaskStatus.PROCESSING)
+            self.assertEqual(in_flight.locked_by, "w_crash_victim")
+
+            # Simulate abrupt worker 1 heartbeat failure/crash by signalling stop on worker 1
+            worker1._stop_event.set()
+
+            # Wait for lease to expire while worker 1 is abandoned in-flight
+            time.sleep(0.5)
+
+            # Clear synchronization barrier so survivor worker 2 proceeds immediately
+            TestSyncBlockingAgent._thread_started_event = None
+            TestSyncBlockingAgent._thread_barrier_event = None
+
+            # 3. Survivor worker reclaims the abandoned task
+            c2 = task_store.claim_next_task(self.project_id, "w_crash_survivor", lease_seconds=5.0)
+            self.assertIsNotNone(c2, "Survivor worker must claim abandoned task")
+            self.assertEqual(c2.locked_by, "w_crash_survivor")
+            self.assertEqual(c2.retry_count, 1)
+
+            # Now release barrier for zombie worker 1 and join it (it will be fenced)
+            barrier_evt.set()
+            worker1.stop(timeout=1.0)
+
+            # Survivor worker processes and completes the recovered task
+            res = task_registry.execute(c2, self.container)
+            self.assertTrue(res.success)
+            task_store.complete_task(
+                self.project_id,
+                c2.task_id,
+                "w_crash_survivor",
+                res.result_data,
+            )
+
+            # 4. Strengthened assertions:
+            # - Exactly one completed task
+            completed_task = task_store.get_task(self.project_id, task.task_id)
+            self.assertIsNotNone(completed_task)
+            self.assertEqual(completed_task.status, TaskStatus.COMPLETED)
+            self.assertIsNone(completed_task.locked_by)
+
+            # - Exactly one interaction record
+            int_rec = self.container.interaction_store.get_by_idempotency_key(idem_key)
+            self.assertIsNotNone(int_rec)
+            self.assertEqual(int_rec.status.value, "COMPLETED")
+
+            # - Exactly one corresponding set of memory side effects (zero duplicate writes)
+            mem_count = self.container.memory_store.count(project_id=self.project_id)
+            self.assertEqual(mem_count, 1)
+
+            # - No duplicate event writes (input and response events match exactly)
+            events = self.container.event_store.get_events_by_project(self.project_id)
+            int_event_ids = {int_rec.input_event_id, int_rec.response_event_id} - {None}
+            matching_events = [e for e in events if e.event_id in int_event_ids]
+            self.assertEqual(len(matching_events), len(int_event_ids))
+            self.assertGreaterEqual(len(matching_events), 1)
+        finally:
+            TestSyncBlockingAgent._thread_started_event = None
+            TestSyncBlockingAgent._thread_barrier_event = None
+
 
 if __name__ == "__main__":
     unittest.main()

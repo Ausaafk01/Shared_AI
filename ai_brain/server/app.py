@@ -16,6 +16,7 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Dict, Optional
 from fastapi import FastAPI, HTTPException, Request, Response, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
@@ -271,7 +272,7 @@ def create_app(
                 "error": "VALIDATION_ERROR",
                 "message": "Request payload validation failed.",
                 "request_id": req_id,
-                "details": {"validation_errors": exc.errors()},
+                "details": {"validation_errors": jsonable_encoder(exc.errors())},
             },
         )
 

@@ -719,6 +719,20 @@ class TestSessionsAndWorkflows(BaseAPITestCase):
         self.assertEqual(task_data["project_id"], self.project_a)
         self.assertEqual(task_data["status"], "PENDING")
 
+        # 6. Safety rejection: payload containing delay/sleep fields is rejected with 422
+        for delay_key in ("sleep_seconds", "delay", "delay_seconds", "pause"):
+            res_delay = self.client.post(
+                f"/api/v1/projects/{self.project_a}/tasks",
+                headers={"Authorization": f"Bearer {self.owner_token}"},
+                json={
+                    "task_type": "memory_maintenance",
+                    "payload": {delay_key: 10.0},
+                    "idempotency_key": f"idem_delay_{delay_key}_{uuid.uuid4().hex[:8]}",
+                },
+            )
+            self.assertEqual(res_delay.status_code, 422)
+            self.assertIn("disallowed execution delay field", res_delay.text)
+
 
 class TestHttpRateLimiting(unittest.TestCase):
     """Test in-process bounded HTTP rate limiter (Token Bucket, IP resolution, LRU eviction)."""

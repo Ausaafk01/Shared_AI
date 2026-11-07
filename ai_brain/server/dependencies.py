@@ -20,6 +20,11 @@ from ai_brain.server.idempotency import (
     SQLiteIdempotencyCoordinator,
 )
 from ai_brain.server.limiter import HttpRateLimiter
+from ai_brain.tasks.models import TaskRecord, TaskResult, TaskStatus
+from ai_brain.tasks.registry import TaskHandlerRegistry
+from ai_brain.tasks.handlers import register_default_handlers
+from ai_brain.tasks.store import BaseTaskStore, PostgreSQLTaskStore, SQLiteTaskStore
+from ai_brain.tasks.fleet import WorkerFleet
 from ai_brain.agents.sessions.manager import SessionManager
 from ai_brain.agents.sessions.models import SessionRecord
 from ai_brain.agents.sessions.storage.sqlite import SQLiteSessionStore
@@ -99,6 +104,9 @@ class BrainServiceContainer:
         session_manager: SessionManager,
         collaboration_engine: CollaborationEngine,
         idempotency_manager: Optional[IdempotencyManager] = None,
+        task_store: Optional[BaseTaskStore] = None,
+        task_registry: Optional[TaskHandlerRegistry] = None,
+        worker_fleet: Optional[WorkerFleet] = None,
     ) -> None:
         self.config = config
         self.db_manager = db_manager
@@ -121,9 +129,23 @@ class BrainServiceContainer:
         self.session_manager = session_manager
         self.collaboration_engine = collaboration_engine
         self.idempotency_manager = idempotency_manager or IdempotencyManager()
+        self.task_store = task_store
+        self.task_registry = task_registry
+        self.worker_fleet = worker_fleet
 
     def close(self) -> None:
-        """Gracefully release stores and database connection pools."""
+        """Gracefully release stores, worker fleets, and database connection pools."""
+        if self.worker_fleet:
+            try:
+                self.worker_fleet.stop(timeout=5.0)
+            except Exception:
+                pass
+        if self.task_store and hasattr(self.task_store, "close"):
+            try:
+                self.task_store.close()
+            except Exception:
+                pass
+
         for comp in (
             self.brain_loop,
             self.session_manager,
@@ -202,6 +224,10 @@ def create_sqlite_container(
     idempotency_coordinator = SQLiteIdempotencyCoordinator(db_path)
     idempotency_manager = IdempotencyManager(coordinator=idempotency_coordinator)
 
+    task_store = SQLiteTaskStore(db_path)
+    task_registry = TaskHandlerRegistry()
+    register_default_handlers(task_registry)
+
     return BrainServiceContainer(
         config=app_cfg,
         db_manager=None,
@@ -224,6 +250,8 @@ def create_sqlite_container(
         session_manager=session_manager,
         collaboration_engine=collaboration_engine,
         idempotency_manager=idempotency_manager,
+        task_store=task_store,
+        task_registry=task_registry,
     )
 
 
@@ -291,6 +319,10 @@ def create_postgres_container(
     idempotency_coordinator = PostgreSQLIdempotencyCoordinator(db_manager)
     idempotency_manager = IdempotencyManager(coordinator=idempotency_coordinator)
 
+    task_store = PostgreSQLTaskStore(db_manager)
+    task_registry = TaskHandlerRegistry()
+    register_default_handlers(task_registry)
+
     return BrainServiceContainer(
         config=app_cfg,
         db_manager=db_manager,
@@ -313,6 +345,8 @@ def create_postgres_container(
         session_manager=session_manager,
         collaboration_engine=collaboration_engine,
         idempotency_manager=idempotency_manager,
+        task_store=task_store,
+        task_registry=task_registry,
     )
 
 

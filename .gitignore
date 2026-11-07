@@ -9,6 +9,7 @@ __pycache__/
 htmlcov/
 .env
 .env.*
+!.env.example
 *.secret
 *.key
 *.pem

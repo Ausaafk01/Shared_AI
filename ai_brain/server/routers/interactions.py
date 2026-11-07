@@ -195,7 +195,7 @@ async def complete_interaction(
     container: BrainServiceContainer = Depends(get_container),
 ) -> InteractionCompleteResponse:
     """Completes interaction execution, triggers memory extraction, updates graphs, and writes events."""
-    existing = container.brain_loop.get_interaction(interaction_id)
+    existing = container.brain_loop.get_interaction(interaction_id, project_id=project_id)
     if not existing or existing.project_id != project_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -271,7 +271,7 @@ async def get_interaction(
     container: BrainServiceContainer = Depends(get_container),
 ) -> InteractionRecordDTO:
     """Retrieve an interaction record by identifier."""
-    interaction = container.brain_loop.get_interaction(interaction_id)
+    interaction = container.brain_loop.get_interaction(interaction_id, project_id=project_id)
     if not interaction or interaction.project_id != project_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -434,7 +434,7 @@ async def stream_interaction(
                         reservation.mark_interrupted(reason)
                     except Exception as e:
                         logger.warning("Failed to mark reservation interrupted: %s", e)
-                rec = container.brain_loop.interaction_store.get(interaction_id)
+                rec = container.brain_loop.interaction_store.get(interaction_id, project_id=project_id)
                 if rec and rec.status not in (InteractionStatus.COMPLETED, InteractionStatus.PARTIAL_SUCCESS):
                     failed_rec = InteractionRecord(
                         interaction_id=rec.interaction_id,

@@ -150,14 +150,20 @@ class SQLiteInteractionStore(InteractionStore):
             except sqlite3.Error as e:
                 raise BrainLoopError(f"Failed to persist interaction record '{record.interaction_id}': {e}") from e
 
-    def get(self, interaction_id: str) -> Optional[InteractionRecord]:
+    def get(self, interaction_id: str, project_id: Optional[str] = None) -> Optional[InteractionRecord]:
         """Retrieve an interaction record by its interaction_id."""
         with self._lock:
             if self._closed:
                 raise BrainLoopError("Interaction store is closed")
             try:
                 cur = self._conn.cursor()
-                cur.execute("SELECT data FROM interactions WHERE interaction_id = ?;", (interaction_id,))
+                if project_id:
+                    cur.execute(
+                        "SELECT data FROM interactions WHERE interaction_id = ? AND project_id = ?;",
+                        (interaction_id, project_id),
+                    )
+                else:
+                    cur.execute("SELECT data FROM interactions WHERE interaction_id = ?;", (interaction_id,))
                 row = cur.fetchone()
                 if row is None:
                     return None
@@ -165,14 +171,22 @@ class SQLiteInteractionStore(InteractionStore):
             except sqlite3.Error as e:
                 raise BrainLoopError(f"Failed to load interaction '{interaction_id}': {e}") from e
 
-    def get_by_idempotency_key(self, idempotency_key: str) -> Optional[InteractionRecord]:
+    def get_by_idempotency_key(
+        self, idempotency_key: str, project_id: Optional[str] = None
+    ) -> Optional[InteractionRecord]:
         """Retrieve an interaction record by its idempotency_key."""
         with self._lock:
             if self._closed:
                 raise BrainLoopError("Interaction store is closed")
             try:
                 cur = self._conn.cursor()
-                cur.execute("SELECT data FROM interactions WHERE idempotency_key = ?;", (idempotency_key,))
+                if project_id:
+                    cur.execute(
+                        "SELECT data FROM interactions WHERE idempotency_key = ? AND project_id = ?;",
+                        (idempotency_key, project_id),
+                    )
+                else:
+                    cur.execute("SELECT data FROM interactions WHERE idempotency_key = ?;", (idempotency_key,))
                 row = cur.fetchone()
                 if row is None:
                     return None

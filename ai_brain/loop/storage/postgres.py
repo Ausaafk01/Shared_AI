@@ -59,10 +59,32 @@ class PostgreSQLInteractionStore(InteractionStore):
     def _resolve_project(self, project_id: Optional[str]) -> str:
         proj = project_id or self.default_project_id
         if not proj:
-            raise BrainLoopError(
-                "project_id must be provided or default_project_id set on PostgreSQLInteractionStore."
-            )
+            if self._known_projects:
+                return next(iter(self._known_projects))
+            return "default"
         return proj
+
+    def _resolve_candidate_projects(self, project_id: Optional[str] = None) -> List[str]:
+        if project_id:
+            return [project_id]
+        candidates: List[str] = []
+        if self.default_project_id:
+            candidates.append(self.default_project_id)
+        for p in self._known_projects:
+            if p not in candidates:
+                candidates.append(p)
+        try:
+            with self.db.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT project_id FROM projects;")
+                    for r in cur.fetchall():
+                        if r[0] not in candidates:
+                            candidates.append(r[0])
+        except Exception:
+            pass
+        if not candidates:
+            candidates.append("default")
+        return candidates
 
     def save(self, record: InteractionRecord) -> None:
         """Persist or update an InteractionRecord in PostgreSQL."""
@@ -175,9 +197,7 @@ class PostgreSQLInteractionStore(InteractionStore):
         if self._closed:
             raise BrainLoopError("PostgreSQLInteractionStore is closed.")
 
-        candidate_projects = [project_id] if project_id else (
-            [self.default_project_id] if self.default_project_id else list(self._known_projects)
-        )
+        candidate_projects = self._resolve_candidate_projects(project_id)
 
         for proj in candidate_projects:
             if not proj:
@@ -207,9 +227,7 @@ class PostgreSQLInteractionStore(InteractionStore):
         if self._closed:
             raise BrainLoopError("PostgreSQLInteractionStore is closed.")
 
-        candidate_projects = [project_id] if project_id else (
-            [self.default_project_id] if self.default_project_id else list(self._known_projects)
-        )
+        candidate_projects = self._resolve_candidate_projects(project_id)
 
         for proj in candidate_projects:
             if not proj:

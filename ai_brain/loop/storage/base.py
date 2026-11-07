@@ -24,12 +24,12 @@ class InteractionStore(ABC):
         pass
 
     @abstractmethod
-    def get(self, interaction_id: str) -> Optional[InteractionRecord]:
+    def get(self, interaction_id: str, project_id: Optional[str] = None) -> Optional[InteractionRecord]:
         """Retrieve an interaction record by its unique interaction_id."""
         pass
 
     @abstractmethod
-    def get_by_idempotency_key(self, idempotency_key: str) -> Optional[InteractionRecord]:
+    def get_by_idempotency_key(self, idempotency_key: str, project_id: Optional[str] = None) -> Optional[InteractionRecord]:
         """Retrieve an interaction record by its idempotency_key."""
         pass
 

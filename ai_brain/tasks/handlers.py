@@ -55,9 +55,15 @@ def handle_interaction_execution(task: TaskRecord, context: Any = None) -> Dict[
         if hasattr(context.brain_loop, "interaction_store") and context.brain_loop.interaction_store is not None:
             existing = None
             if idempotency_key:
-                existing = context.brain_loop.interaction_store.get_by_idempotency_key(idempotency_key)
+                try:
+                    existing = context.brain_loop.interaction_store.get_by_idempotency_key(idempotency_key, project_id=project_id)
+                except TypeError:
+                    existing = context.brain_loop.interaction_store.get_by_idempotency_key(idempotency_key)
             if not existing and interaction_id:
-                existing = context.brain_loop.interaction_store.get(interaction_id)
+                try:
+                    existing = context.brain_loop.interaction_store.get(interaction_id, project_id=project_id)
+                except TypeError:
+                    existing = context.brain_loop.interaction_store.get(interaction_id)
             if existing and existing.status.value in ("COMPLETED", "PARTIAL_SUCCESS"):
                 # Guarantee all memories are durably persisted in memory_store before acknowledging
                 if hasattr(context, "memory_store") and context.memory_store is not None:

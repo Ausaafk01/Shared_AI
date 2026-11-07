@@ -972,6 +972,18 @@ class TestContainerFactoryAndConfiguration(unittest.TestCase):
                     evt_count, evt_types = cur.fetchone()
                     self.assertEqual(evt_count, 4)
                     self.assertEqual(evt_types, 4)
+
+            # 5. Verify a freshly initialized independent container (simulating separate API container)
+            # can look up the completed interaction via brain_loop.get_interaction() and interaction_store.get()
+            api_db = DatabaseConnectionManager(DatabaseConfig(database_url=pg_url))
+            api_container = create_postgres_container(api_db)
+            try:
+                fresh_interaction = api_container.brain_loop.get_interaction(int_id, project_id=project_id)
+                self.assertIsNotNone(fresh_interaction, "Fresh API container must find interaction record across processes")
+                self.assertEqual(fresh_interaction.status.value, "COMPLETED")
+                self.assertEqual(fresh_interaction.interaction_id, int_id)
+            finally:
+                api_container.close()
         finally:
             TestSyncBlockingAgent._thread_started_event = None
             TestSyncBlockingAgent._thread_barrier_event = None

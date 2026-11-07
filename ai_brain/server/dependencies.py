@@ -278,7 +278,9 @@ def create_postgres_container(
     rbac_service = AuthorizationService(auth_store, audit_logger=audit_logger)
 
     event_store = PostgreSQLEventStore(db_manager)
-    interaction_store = PostgreSQLInteractionStore(db_manager)
+    interaction_store = PostgreSQLInteractionStore(
+        db_manager, default_project_id=app_cfg.security.default_project_id
+    )
     memory_store = PostgreSQLMemoryStore(db_manager)
     memory_updater = MemoryUpdater()
 

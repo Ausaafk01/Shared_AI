@@ -206,14 +206,38 @@ def get_container_auth_token() -> str:
     return validate_token_structure(candidate)
 
 
-def query_postgres(sql: str) -> str:
-    """Execute SQL query directly against the PostgreSQL container."""
-    cmd = [
-        "docker", "compose", "exec", "-T", "postgres",
-        "psql", "-U", "ai_brain_user", "-d", "ai_brain", "-t", "-A", "-c", sql,
-    ]
-    _, out, _ = run_cmd(cmd)
-    return out.strip()
+def query_postgres(sql: str, params: Optional[Sequence[Any]] = None) -> str:
+    """Execute SQL query directly against the PostgreSQL container with native parameterization."""
+    if params:
+        script = (
+            "import sys, json, psycopg\n"
+            "from ai_brain.config import load_config_from_env\n"
+            "cfg = load_config_from_env()\n"
+            "db_url = cfg.db.database_url.replace('+psycopg', '')\n"
+            "sql = sys.argv[1]\n"
+            "params = json.loads(sys.argv[2])\n"
+            "with psycopg.connect(db_url) as conn:\n"
+            "    with conn.cursor() as cur:\n"
+            "        cur.execute(sql, params)\n"
+            "        res = cur.fetchall()\n"
+            "        if res and len(res) == 1 and len(res[0]) == 1:\n"
+            "            print(res[0][0])\n"
+            "        else:\n"
+            "            for row in res:\n"
+            "                print('|'.join(str(c) if c is not None else '' for c in row))\n"
+        )
+        cmd = [
+            "docker", "compose", "exec", "-T", "api", "python", "-c", script, sql, json.dumps(list(params))
+        ]
+        _, out, _ = run_cmd(cmd)
+        return out.strip()
+    else:
+        cmd = [
+            "docker", "compose", "exec", "-T", "postgres",
+            "psql", "-U", "ai_brain_user", "-d", "ai_brain", "-t", "-A", "-c", sql,
+        ]
+        _, out, _ = run_cmd(cmd)
+        return out.strip()
 
 
 def run_acceptance(clean_volumes: bool = False) -> int:
@@ -356,8 +380,9 @@ def run_acceptance(clean_volumes: bool = False) -> int:
 
         # 9. Worker Crash Recovery During Active Execution
         logger.info("[Step 9] Executing worker crash-recovery during active task execution...")
-        crash_idempotency_key = f"ci_crash_recovery_{int(time.time())}"
-        crash_interaction_id = f"int_crash_{int(time.time())}"
+        crash_idempotency_key = f"ci_crash_recovery_{int(time.time() * 1000)}"
+        crash_interaction_id = f"int_crash_{int(time.time() * 1000)}"
+        crash_session_id = f"sess_ci_crash_{int(time.time() * 1000)}"
         barrier_path = "/tmp/ai_brain_test_sync_barrier"
         proc_path = "/tmp/ai_brain_test_sync_processing"
 
@@ -370,7 +395,7 @@ def run_acceptance(clean_volumes: bool = False) -> int:
             "task_type": "interaction_execution",
             "payload": {
                 "input_text": "Active crash recovery verification: We decided to deploy PostgreSQL with automated lease recovery.",
-                "session_id": "sess_ci_crash_002",
+                "session_id": crash_session_id,
                 "agent_id": "test-sync-blocker",
                 "interaction_id": crash_interaction_id,
             },
@@ -463,69 +488,144 @@ def run_acceptance(clean_volumes: bool = False) -> int:
         logger.info("Replacement worker claimed abandoned task and successfully completed it.")
 
         # Strengthened database-backed verification of exactly-once side effects
-        # 1. Exactly one completed task
+        # 1. Exactly one completed task in target project
         task_db_count = query_postgres(
-            f"SELECT COUNT(*) FROM background_tasks WHERE task_id = '{crash_task_id}' AND status = 'COMPLETED';"
+            "SELECT COUNT(*) FROM background_tasks WHERE project_id = %s AND task_id = %s AND status = 'COMPLETED';",
+            params=["default", crash_task_id],
         )
         assert task_db_count == "1", f"Expected exactly 1 completed task in DB, got: {task_db_count}"
 
-        # 2. Exactly one interaction record
+        # 2. Exactly one interaction record with exact interaction_id and idempotency_key
         int_db_count = query_postgres(
-            f"SELECT COUNT(*) FROM interactions WHERE idempotency_key = '{crash_idempotency_key}';"
+            "SELECT COUNT(*) FROM interactions WHERE project_id = %s AND idempotency_key = %s AND interaction_id = %s AND status = 'COMPLETED';",
+            params=["default", crash_idempotency_key, crash_interaction_id],
         )
-        assert int_db_count == "1", f"Expected exactly 1 interaction record in DB, got: {int_db_count}"
+        assert int_db_count == "1", f"Expected exactly 1 completed interaction record in DB, got: {int_db_count}"
 
-        # 3. Exactly one logical set of memories produced by the recovered interaction
+        # 3. Memories strictly scoped by exact interaction_id, session_id, and project_id via event provenance
         # Prompt and agent response each yield one distinct decision memory
         mem_distinct_contents = query_postgres(
-            "SELECT COUNT(DISTINCT content) FROM memories WHERE content ILIKE '%automated lease recovery%';"
+            """
+            SELECT COUNT(DISTINCT m.content)
+            FROM memories m
+            CROSS JOIN LATERAL jsonb_array_elements_text(m.metadata->'source_event_ids') AS src(eid)
+            JOIN events e ON e.event_id = src.eid
+            WHERE e.project_id = %s
+              AND e.session_id = %s
+              AND e.payload->'metadata'->>'interaction_id' = %s;
+            """,
+            params=["default", crash_session_id, crash_interaction_id],
         )
-        assert mem_distinct_contents == "2", f"Expected exactly 2 distinct memory contents (prompt + response decisions), got: {mem_distinct_contents}"
+        assert mem_distinct_contents == "2", f"Expected exactly 2 distinct memory contents for interaction, got: {mem_distinct_contents}"
 
-        # Verify all memories have populated source_event_ids (no orphaned memories)
+        # Verify all memories produced by this target interaction have populated source_event_ids (no orphaned memories)
         orphaned_mems = query_postgres(
-            "SELECT COUNT(*) FROM memories WHERE content ILIKE '%automated lease recovery%' "
-            "AND (metadata->'source_event_ids' IS NULL OR jsonb_array_length(metadata->'source_event_ids') = 0);"
+            """
+            SELECT COUNT(*)
+            FROM memories m
+            CROSS JOIN LATERAL jsonb_array_elements_text(m.metadata->'source_event_ids') AS src(eid)
+            JOIN events e ON e.event_id = src.eid
+            WHERE e.project_id = %s
+              AND e.session_id = %s
+              AND e.payload->'metadata'->>'interaction_id' = %s
+              AND (m.metadata->'source_event_ids' IS NULL OR jsonb_array_length(m.metadata->'source_event_ids') = 0);
+            """,
+            params=["default", crash_session_id, crash_interaction_id],
         )
         assert orphaned_mems == "0", f"Found memories without populated source_event_ids: {orphaned_mems}"
 
         # Authoritative event-sourced provenance: trace memory source_event_ids to events and verify single interaction provenance
         mem_interaction_count = query_postgres(
-            "SELECT COUNT(DISTINCT e.payload->'metadata'->>'interaction_id') "
-            "FROM memories m "
-            "CROSS JOIN LATERAL jsonb_array_elements_text(m.metadata->'source_event_ids') AS src(eid) "
-            "JOIN events e ON e.event_id = src.eid "
-            "WHERE m.content ILIKE '%automated lease recovery%';"
+            """
+            SELECT COUNT(DISTINCT e.payload->'metadata'->>'interaction_id')
+            FROM memories m
+            CROSS JOIN LATERAL jsonb_array_elements_text(m.metadata->'source_event_ids') AS src(eid)
+            JOIN events e ON e.event_id = src.eid
+            WHERE e.project_id = %s
+              AND e.session_id = %s
+              AND e.payload->'metadata'->>'interaction_id' = %s;
+            """,
+            params=["default", crash_session_id, crash_interaction_id],
         )
         assert mem_interaction_count == "1", f"Expected all memories to trace to exactly 1 interaction, got: {mem_interaction_count}"
 
         matched_interaction_id = query_postgres(
-            "SELECT DISTINCT e.payload->'metadata'->>'interaction_id' "
-            "FROM memories m "
-            "CROSS JOIN LATERAL jsonb_array_elements_text(m.metadata->'source_event_ids') AS src(eid) "
-            "JOIN events e ON e.event_id = src.eid "
-            "WHERE m.content ILIKE '%automated lease recovery%';"
+            """
+            SELECT DISTINCT e.payload->'metadata'->>'interaction_id'
+            FROM memories m
+            CROSS JOIN LATERAL jsonb_array_elements_text(m.metadata->'source_event_ids') AS src(eid)
+            JOIN events e ON e.event_id = src.eid
+            WHERE e.project_id = %s
+              AND e.session_id = %s
+              AND e.payload->'metadata'->>'interaction_id' = %s;
+            """,
+            params=["default", crash_session_id, crash_interaction_id],
         )
         assert matched_interaction_id == crash_interaction_id, (
             f"Memory provenance mismatch: expected interaction '{crash_interaction_id}', got '{matched_interaction_id}'"
         )
 
         mem_session_count = query_postgres(
-            "SELECT COUNT(DISTINCT e.session_id) "
-            "FROM memories m "
-            "CROSS JOIN LATERAL jsonb_array_elements_text(m.metadata->'source_event_ids') AS src(eid) "
-            "JOIN events e ON e.event_id = src.eid "
-            "WHERE m.content ILIKE '%automated lease recovery%';"
+            """
+            SELECT COUNT(DISTINCT e.session_id)
+            FROM memories m
+            CROSS JOIN LATERAL jsonb_array_elements_text(m.metadata->'source_event_ids') AS src(eid)
+            JOIN events e ON e.event_id = src.eid
+            WHERE e.project_id = %s
+              AND e.session_id = %s
+              AND e.payload->'metadata'->>'interaction_id' = %s;
+            """,
+            params=["default", crash_session_id, crash_interaction_id],
         )
         assert mem_session_count == "1", f"Expected all memory source events to belong to 1 session, got: {mem_session_count}"
 
+        matched_session_id = query_postgres(
+            """
+            SELECT DISTINCT e.session_id
+            FROM memories m
+            CROSS JOIN LATERAL jsonb_array_elements_text(m.metadata->'source_event_ids') AS src(eid)
+            JOIN events e ON e.event_id = src.eid
+            WHERE e.project_id = %s
+              AND e.session_id = %s
+              AND e.payload->'metadata'->>'interaction_id' = %s;
+            """,
+            params=["default", crash_session_id, crash_interaction_id],
+        )
+        assert matched_session_id == crash_session_id, (
+            f"Memory session mismatch: expected session '{crash_session_id}', got '{matched_session_id}'"
+        )
+
+        # Cross-interaction isolation check: verify that NO memory from this interaction is linked to any other interaction
+        contamination_count = query_postgres(
+            """
+            SELECT COUNT(*)
+            FROM memories m
+            CROSS JOIN LATERAL jsonb_array_elements_text(m.metadata->'source_event_ids') AS src(eid)
+            JOIN events e ON e.event_id = src.eid
+            WHERE m.memory_id IN (
+                SELECT DISTINCT m2.memory_id
+                FROM memories m2
+                CROSS JOIN LATERAL jsonb_array_elements_text(m2.metadata->'source_event_ids') AS src2(eid2)
+                JOIN events e2 ON e2.event_id = src2.eid2
+                WHERE e2.project_id = %s
+                  AND e2.session_id = %s
+                  AND e2.payload->'metadata'->>'interaction_id' = %s
+            )
+            AND (e.payload->'metadata'->>'interaction_id' != %s OR e.session_id != %s);
+            """,
+            params=["default", crash_session_id, crash_interaction_id, crash_interaction_id, crash_session_id],
+        )
+        assert contamination_count == "0", f"Found cross-interaction contamination in memories: {contamination_count}"
+
         # 4. Exactly one corresponding set of lifecycle events (INPUT, CONTEXT, RESPONSE, COMPLETED)
         evt_db_count = query_postgres(
-            f"SELECT COUNT(*) FROM events WHERE session_id = 'sess_ci_crash_002';"
+            "SELECT COUNT(*) FROM events WHERE project_id = %s AND session_id = %s AND payload->'metadata'->>'interaction_id' = %s;",
+            params=["default", crash_session_id, crash_interaction_id],
         )
         assert evt_db_count == "4", f"Expected exactly 4 lifecycle events for interaction session, got: {evt_db_count}"
         evt_distinct_types = query_postgres(
-            f"SELECT COUNT(DISTINCT event_type) FROM events WHERE session_id = 'sess_ci_crash_002';"
+            "SELECT COUNT(DISTINCT event_type) FROM events WHERE project_id = %s AND session_id = %s AND payload->'metadata'->>'interaction_id' = %s;",
+            params=["default", crash_session_id, crash_interaction_id],
         )
         assert evt_distinct_types == "4", f"Expected 4 distinct event types across lifecycle, got: {evt_distinct_types}"
 

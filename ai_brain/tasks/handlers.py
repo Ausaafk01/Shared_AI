@@ -59,6 +59,22 @@ def handle_interaction_execution(task: TaskRecord, context: Any = None) -> Dict[
             if not existing and interaction_id:
                 existing = context.brain_loop.interaction_store.get(interaction_id)
             if existing and existing.status.value in ("COMPLETED", "PARTIAL_SUCCESS"):
+                # Guarantee all memories are durably persisted in memory_store before acknowledging
+                if hasattr(context, "memory_store") and context.memory_store is not None:
+                    comp_res = existing.completion_result
+                    if comp_res:
+                        all_mems = {m.memory_id: m for m in comp_res.extracted_memories}
+                        for u in getattr(comp_res, "update_results", ()):
+                            if getattr(u, "current_memory", None):
+                                all_mems[u.current_memory.memory_id] = u.current_memory
+                            for aff in getattr(u, "affected_memories", ()):
+                                all_mems[aff.memory_id] = aff
+                        for m in all_mems.values():
+                            try:
+                                context.memory_store.store(m)
+                            except Exception as e:
+                                logger.error("Failed to persist memory '%s' to memory store on idempotent resumption: %s", m.memory_id, e)
+                                raise TransientTaskError(f"Failed to persist memory '{m.memory_id}' on resumption: {e}") from e
                 logger.info("Interaction '%s' already completed; returning existing result", existing.interaction_id)
                 comp_res = existing.completion_result
                 return {
@@ -130,7 +146,8 @@ def handle_interaction_execution(task: TaskRecord, context: Any = None) -> Dict[
                 try:
                     context.memory_store.store(m)
                 except Exception as e:
-                    logger.warning("Failed to store memory '%s' in memory store: %s", m.memory_id, e)
+                    logger.error("Failed to persist memory '%s' in memory store: %s", m.memory_id, e)
+                    raise TransientTaskError(f"Failed to persist durable memory side effect '{m.memory_id}': {e}") from e
 
         return {
             "interaction_id": interaction_id,

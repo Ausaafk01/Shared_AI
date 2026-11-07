@@ -684,7 +684,7 @@ class TestContainerFactoryAndConfiguration(unittest.TestCase):
             container.close()
 
     def test_postgres_memory_event_provenance_lifecycle(self) -> None:
-        """Verify authoritative PostgreSQL event-sourced memory provenance queries used in acceptance harness."""
+        """Verify strictly isolated PostgreSQL event-sourced memory provenance queries."""
         import psycopg
         from ai_brain.config import DatabaseConfig
         from ai_brain.storage.database import DatabaseConnectionManager
@@ -725,22 +725,40 @@ class TestContainerFactoryAndConfiguration(unittest.TestCase):
 
             with psycopg.connect(pg_url) as conn:
                 with conn.cursor() as cur:
-                    # 1. Distinct contents
+                    # 1. Distinct contents scoped strictly by project_id, session_id, and interaction_id
                     cur.execute(
-                        "SELECT COUNT(DISTINCT content) FROM memories WHERE content ILIKE '%automated lease recovery%';"
+                        """
+                        SELECT COUNT(DISTINCT m.content)
+                        FROM memories m
+                        CROSS JOIN LATERAL jsonb_array_elements_text(m.metadata->'source_event_ids') AS src(eid)
+                        JOIN events e ON e.event_id = src.eid
+                        WHERE e.project_id = %s
+                          AND e.session_id = %s
+                          AND e.payload->'metadata'->>'interaction_id' = %s;
+                        """,
+                        ("default", crash_sess_id, crash_int_id),
                     )
                     distinct_contents = cur.fetchone()[0]
-                    self.assertGreaterEqual(distinct_contents, 1)
+                    self.assertEqual(distinct_contents, 2)
 
-                    # 2. No orphaned memories (all have populated source_event_ids)
+                    # 2. No orphaned memories for this target interaction
                     cur.execute(
-                        "SELECT COUNT(*) FROM memories WHERE content ILIKE '%automated lease recovery%' "
-                        "AND (metadata->'source_event_ids' IS NULL OR jsonb_array_length(metadata->'source_event_ids') = 0);"
+                        """
+                        SELECT COUNT(*)
+                        FROM memories m
+                        CROSS JOIN LATERAL jsonb_array_elements_text(m.metadata->'source_event_ids') AS src(eid)
+                        JOIN events e ON e.event_id = src.eid
+                        WHERE e.project_id = %s
+                          AND e.session_id = %s
+                          AND e.payload->'metadata'->>'interaction_id' = %s
+                          AND (m.metadata->'source_event_ids' IS NULL OR jsonb_array_length(m.metadata->'source_event_ids') = 0);
+                        """,
+                        ("default", crash_sess_id, crash_int_id),
                     )
                     orphaned = cur.fetchone()[0]
                     self.assertEqual(orphaned, 0)
 
-                    # 3. Trace memory source_event_ids to events and verify interaction provenance
+                    # 3. Exact interaction ID provenance
                     cur.execute(
                         """
                         SELECT COUNT(DISTINCT e.payload->'metadata'->>'interaction_id'),
@@ -748,16 +766,17 @@ class TestContainerFactoryAndConfiguration(unittest.TestCase):
                         FROM memories m
                         CROSS JOIN LATERAL jsonb_array_elements_text(m.metadata->'source_event_ids') AS src(eid)
                         JOIN events e ON e.event_id = src.eid
-                        WHERE m.content ILIKE '%%automated lease recovery%%'
+                        WHERE e.project_id = %s
+                          AND e.session_id = %s
                           AND e.payload->'metadata'->>'interaction_id' = %s;
                         """,
-                        (crash_int_id,),
+                        ("default", crash_sess_id, crash_int_id),
                     )
                     interaction_matches, matched_id = cur.fetchone()
                     self.assertEqual(interaction_matches, 1)
                     self.assertEqual(matched_id, crash_int_id)
 
-                    # 4. Trace session_id
+                    # 4. Exact session ID provenance
                     cur.execute(
                         """
                         SELECT COUNT(DISTINCT e.session_id),
@@ -765,14 +784,245 @@ class TestContainerFactoryAndConfiguration(unittest.TestCase):
                         FROM memories m
                         CROSS JOIN LATERAL jsonb_array_elements_text(m.metadata->'source_event_ids') AS src(eid)
                         JOIN events e ON e.event_id = src.eid
-                        WHERE m.content ILIKE '%%automated lease recovery%%'
-                          AND e.session_id = %s;
+                        WHERE e.project_id = %s
+                          AND e.session_id = %s
+                          AND e.payload->'metadata'->>'interaction_id' = %s;
                         """,
-                        (crash_sess_id,),
+                        ("default", crash_sess_id, crash_int_id),
                     )
                     session_matches, matched_sess = cur.fetchone()
                     self.assertEqual(session_matches, 1)
                     self.assertEqual(matched_sess, crash_sess_id)
+
+                    # 5. Negative contamination check
+                    cur.execute(
+                        """
+                        SELECT COUNT(*)
+                        FROM memories m
+                        CROSS JOIN LATERAL jsonb_array_elements_text(m.metadata->'source_event_ids') AS src(eid)
+                        JOIN events e ON e.event_id = src.eid
+                        WHERE m.memory_id IN (
+                            SELECT DISTINCT m2.memory_id
+                            FROM memories m2
+                            CROSS JOIN LATERAL jsonb_array_elements_text(m2.metadata->'source_event_ids') AS src2(eid2)
+                            JOIN events e2 ON e2.event_id = src2.eid2
+                            WHERE e2.project_id = %s
+                              AND e2.session_id = %s
+                              AND e2.payload->'metadata'->>'interaction_id' = %s
+                        )
+                        AND (e.payload->'metadata'->>'interaction_id' != %s OR e.session_id != %s);
+                        """,
+                        ("default", crash_sess_id, crash_int_id, crash_int_id, crash_sess_id),
+                    )
+                    contamination = cur.fetchone()[0]
+                    self.assertEqual(contamination, 0)
+        finally:
+            container.close()
+
+    def test_postgres_worker_crash_recovery_lifecycle_and_side_effects(self) -> None:
+        """Integration test exercising complete persisted worker crash-recovery lifecycle on PostgreSQL."""
+        import psycopg
+        import threading
+        from ai_brain.config import DatabaseConfig
+        from ai_brain.storage.database import DatabaseConnectionManager
+        from ai_brain.tasks.models import TaskRecord, TaskStatus
+        from ai_brain.tasks.worker import BackgroundWorker
+        from ai_brain.agents.simulated.sync import TestSyncBlockingAgent
+        from ai_brain.server.dependencies import create_postgres_container
+
+        pg_url = os.environ.get("TEST_POSTGRES_URL", "postgresql://postgres@127.0.0.1:5432/test_ai_brain")
+        try:
+            with psycopg.connect(pg_url) as test_conn:
+                with test_conn.cursor() as cur:
+                    cur.execute("SELECT 1;")
+        except Exception:
+            self.skipTest(f"PostgreSQL not available at {pg_url}")
+
+        db = DatabaseConnectionManager(DatabaseConfig(database_url=pg_url))
+        container = create_postgres_container(db)
+        project_id = "default"
+        uid = f"{int(time.time() * 1000)}"
+        task_id = f"task_crash_pg_{uid}"
+        int_id = f"int_crash_pg_{uid}"
+        sess_id = f"sess_crash_pg_{uid}"
+        idem_key = f"idem_crash_pg_{uid}"
+
+        started_evt = threading.Event()
+        barrier_evt = threading.Event()
+        TestSyncBlockingAgent._thread_started_event = started_evt
+        TestSyncBlockingAgent._thread_barrier_event = barrier_evt
+
+        worker_a = None
+        try:
+            # 1. Submit interaction execution task to PostgreSQL task queue
+            submitted_task = container.task_store.submit_task(
+                project_id=project_id,
+                task_type="interaction_execution",
+                payload={
+                    "input_text": "Active crash recovery verification: We decided to deploy PostgreSQL with automated lease recovery.",
+                    "session_id": sess_id,
+                    "agent_id": "test-sync-blocker",
+                    "interaction_id": int_id,
+                    "idempotency_key": idem_key,
+                },
+                idempotency_key=idem_key,
+            )
+            self.assertEqual(submitted_task.status, TaskStatus.PENDING)
+
+            # 2. Worker A claims task with short lease (0.2s) and begins execution
+            worker_a = BackgroundWorker(
+                store=container.task_store,
+                project_id=project_id,
+                registry=container.task_registry,
+                context=container,
+                worker_id="worker_a_victim",
+                poll_interval=0.02,
+                lease_seconds=0.2,
+            )
+            worker_a.start()
+
+            # Wait deterministically for Worker A to claim task and enter execution
+            self.assertTrue(started_evt.wait(timeout=5.0), "Worker A failed to enter execution")
+
+            # Verify task is currently locked in PROCESSING state by Worker A in PostgreSQL
+            in_flight = container.task_store.get_task(project_id, submitted_task.task_id)
+            self.assertIsNotNone(in_flight)
+            self.assertEqual(in_flight.status, TaskStatus.PROCESSING)
+            self.assertEqual(in_flight.locked_by, "worker_a_victim")
+
+            # Simulate abrupt crash of Worker A by stopping its loop without releasing task lease
+            worker_a._stop_event.set()
+
+            # Allow lease to expire
+            time.sleep(0.4)
+
+            # Clear synchronization barrier so Worker B proceeds cleanly
+            TestSyncBlockingAgent._thread_started_event = None
+            TestSyncBlockingAgent._thread_barrier_event = None
+
+            # 3. Worker B reclaims the abandoned task from PostgreSQL queue
+            claimed_by_b = container.task_store.claim_next_task(project_id, "worker_b_survivor", lease_seconds=10.0)
+            self.assertIsNotNone(claimed_by_b, "Worker B must reclaim abandoned task from PostgreSQL queue")
+            self.assertEqual(claimed_by_b.locked_by, "worker_b_survivor")
+            self.assertEqual(claimed_by_b.retry_count, 1)
+
+            # Release barrier and join Worker A (Worker A will be fenced if it attempts updates)
+            barrier_evt.set()
+            worker_a.stop(timeout=1.0)
+            worker_a = None
+
+            # Worker B executes and completes the reclaimed task
+            exec_res = container.task_registry.execute(claimed_by_b, container)
+            self.assertTrue(exec_res.success)
+            completed_task = container.task_store.complete_task(
+                project_id=project_id,
+                task_id=claimed_by_b.task_id,
+                worker_id="worker_b_survivor",
+                result_payload=exec_res.result_data,
+            )
+            self.assertEqual(completed_task.status, TaskStatus.COMPLETED)
+
+            # 4. Independent inspection of PostgreSQL records
+            with psycopg.connect(pg_url) as conn:
+                with conn.cursor() as cur:
+                    # Verify task record
+                    cur.execute(
+                        "SELECT status, retry_count, locked_by FROM background_tasks WHERE project_id = %s AND task_id = %s;",
+                        (project_id, submitted_task.task_id),
+                    )
+                    task_row = cur.fetchone()
+                    self.assertIsNotNone(task_row)
+                    self.assertEqual(task_row[0], "COMPLETED")
+                    self.assertEqual(task_row[1], 1)
+                    self.assertIsNone(task_row[2])
+
+                    # Verify interaction record
+                    cur.execute(
+                        "SELECT status, idempotency_key FROM interactions WHERE project_id = %s AND interaction_id = %s;",
+                        (project_id, int_id),
+                    )
+                    int_row = cur.fetchone()
+                    self.assertIsNotNone(int_row)
+                    self.assertEqual(int_row[0], "COMPLETED")
+                    self.assertEqual(int_row[1], idem_key)
+
+                    # Verify memories strictly traced to this interaction
+                    cur.execute(
+                        """
+                        SELECT COUNT(DISTINCT m.content)
+                        FROM memories m
+                        CROSS JOIN LATERAL jsonb_array_elements_text(m.metadata->'source_event_ids') AS src(eid)
+                        JOIN events e ON e.event_id = src.eid
+                        WHERE e.project_id = %s AND e.session_id = %s AND e.payload->'metadata'->>'interaction_id' = %s;
+                        """,
+                        (project_id, sess_id, int_id),
+                    )
+                    mem_contents_count = cur.fetchone()[0]
+                    self.assertEqual(mem_contents_count, 2)
+
+                    # Verify events for this interaction
+                    cur.execute(
+                        """
+                        SELECT COUNT(*), COUNT(DISTINCT event_type)
+                        FROM events
+                        WHERE project_id = %s AND session_id = %s AND payload->'metadata'->>'interaction_id' = %s;
+                        """,
+                        (project_id, sess_id, int_id),
+                    )
+                    evt_count, evt_types = cur.fetchone()
+                    self.assertEqual(evt_count, 4)
+                    self.assertEqual(evt_types, 4)
+        finally:
+            TestSyncBlockingAgent._thread_started_event = None
+            TestSyncBlockingAgent._thread_barrier_event = None
+            if worker_a:
+                barrier_evt.set()
+                worker_a.stop(timeout=1.0)
+            container.close()
+
+    def test_interaction_execution_memory_persistence_failure_injection_and_retry(self) -> None:
+        """Verify memory persistence failure is not swallowed, raises TransientTaskError, and completes on retry."""
+        from unittest.mock import MagicMock
+        from ai_brain.tasks.models import TaskRecord, TaskStatus
+        from ai_brain.tasks.exceptions import TransientTaskError
+        from ai_brain.tasks.handlers import handle_interaction_execution
+        from ai_brain.server.dependencies import create_sqlite_container
+
+        container = create_sqlite_container(":memory:")
+        try:
+            task = TaskRecord(
+                task_id="task_fail_inject_001",
+                project_id="default",
+                task_type="interaction_execution",
+                payload={
+                    "input_text": "Decision: We decided to deploy PostgreSQL with automated lease recovery.",
+                    "session_id": "sess_fail_inject_001",
+                    "interaction_id": "int_fail_inject_001",
+                    "idempotency_key": "idem_fail_inject_001",
+                },
+                status=TaskStatus.PROCESSING,
+            )
+
+            # Failure injection: make memory_store.store fail
+            original_store = container.memory_store.store
+            container.memory_store.store = MagicMock(side_effect=IOError("Simulated disk full / store failure"))
+
+            # Execution must NOT return COMPLETED and must raise TransientTaskError
+            with self.assertRaises(TransientTaskError) as cm:
+                handle_interaction_execution(task, container)
+            self.assertIn("Failed to persist durable memory side effect", str(cm.exception))
+
+            # Restore working memory store
+            container.memory_store.store = original_store
+
+            # Subsequent retry must succeed and durably store memories
+            res = handle_interaction_execution(task, container)
+            self.assertEqual(res.get("status"), "COMPLETED")
+            self.assertEqual(res.get("interaction_id"), "int_fail_inject_001")
+
+            # Verify memories are present in memory store
+            stored_mems = container.memory_store.list(project_id="default")
+            self.assertGreaterEqual(len(stored_mems), 1)
         finally:
             container.close()
 

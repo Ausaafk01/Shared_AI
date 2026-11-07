@@ -10,6 +10,7 @@ import threading
 import time
 from typing import Any, Optional, Sequence
 
+from ai_brain.observability.metrics import get_metrics_registry
 from ai_brain.tasks.exceptions import (
     PermanentTaskError,
     TaskCancelledError,
@@ -243,6 +244,10 @@ class BackgroundWorker:
 
                 with self._lock:
                     self._tasks_completed += 1
+                try:
+                    get_metrics_registry().tasks_total.inc(project_id=project_id, task_type=task.task_type, status="COMPLETED")
+                except Exception:
+                    pass
                 logger.info("Task '%s' completed successfully by worker '%s'", task_id, self.worker_id)
             else:
                 # Task execution returned failure
@@ -256,6 +261,14 @@ class BackgroundWorker:
                 )
                 with self._lock:
                     self._tasks_failed += 1
+                try:
+                    reg = get_metrics_registry()
+                    if result.is_transient and task.attempts < self.retry_policy.max_retries:
+                        reg.task_retries_total.inc(project_id=project_id, task_type=task.task_type)
+                    else:
+                        reg.task_failures_total.inc(project_id=project_id, task_type=task.task_type, error_class="ExecutionFailed")
+                except Exception:
+                    pass
                 logger.warning("Task '%s' failed (transient=%s): %s", task_id, result.is_transient, result.error_message)
 
         except TaskFencingError:
@@ -277,6 +290,10 @@ class BackgroundWorker:
                 logger.warning("Could not record failure for task '%s': %s", task_id, fail_ex)
             with self._lock:
                 self._tasks_failed += 1
+            try:
+                get_metrics_registry().task_failures_total.inc(project_id=project_id, task_type=task.task_type, error_class=type(e).__name__)
+            except Exception:
+                pass
         finally:
             hb_stop.set()
             hb_thread.join(timeout=1.0)

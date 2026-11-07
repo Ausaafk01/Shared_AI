@@ -7,6 +7,7 @@ import threading
 import uuid
 from typing import Any, Dict, List, Optional
 
+from ai_brain.observability.metrics import get_metrics_registry
 from ai_brain.tasks.exceptions import WorkerError
 from ai_brain.tasks.models import TaskRecord, WorkerInfo, WorkerState
 from ai_brain.tasks.registry import TaskHandlerRegistry
@@ -75,6 +76,11 @@ class WorkerFleet:
                 self._workers.append(worker)
                 worker.start()
 
+        try:
+            get_metrics_registry().worker_active_count.set(self.current_concurrency, fleet_id=self.fleet_id)
+        except Exception:
+            pass
+
     def _create_worker(self, index: int) -> BackgroundWorker:
         worker_id = f"{self.fleet_id}-w{index + 1}-{uuid.uuid4().hex[:6]}"
         return BackgroundWorker(
@@ -100,6 +106,11 @@ class WorkerFleet:
         # Signal workers outside lock
         for worker in workers:
             worker.stop(timeout=timeout, graceful=graceful)
+
+        try:
+            get_metrics_registry().worker_active_count.set(0, fleet_id=self.fleet_id)
+        except Exception:
+            pass
 
         logger.info("Worker fleet %s stopped", self.fleet_id)
 

@@ -1,0 +1,191 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "Application Readiness",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "ai_brain_ready",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "color": "red", "text": "DOWN" }, "1": { "color": "green", "text": "READY" } }, "type": "value" }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }]
+          }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "title": "Database Connection",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "ai_brain_database_connected",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "color": "red", "text": "DISCONNECTED" }, "1": { "color": "green", "text": "CONNECTED" } }, "type": "value" }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }]
+          }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "title": "Active Workers",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(ai_brain_worker_active_count)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "blue", "value": null }]
+          }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "title": "Pending Task Queue",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(ai_brain_task_queue_depth{status=\"PENDING\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 50 }, { "color": "red", "value": 200 }]
+          }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "id": 5,
+      "title": "HTTP Request Rate (RPS by Endpoint)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (endpoint, status_code) (rate(ai_brain_http_requests_total[1m]))",
+          "legendFormat": "{{endpoint}} [{{status_code}}]",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "id": 6,
+      "title": "HTTP Latency (p95 & p99)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(ai_brain_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95 Latency (s)",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(ai_brain_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p99 Latency (s)",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "id": 7,
+      "title": "Task Throughput & Status Transitions",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(ai_brain_tasks_total[1m]))",
+          "legendFormat": "Status: {{status}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "id": 8,
+      "title": "Task Retries & Failures",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(ai_brain_task_retries_total[1m]))",
+          "legendFormat": "Retries / sec",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(ai_brain_task_failures_total[1m]))",
+          "legendFormat": "Failures / sec",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(ai_brain_task_dead_letter_total)",
+          "legendFormat": "DLQ Depth",
+          "refId": "C"
+        }
+      ]
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["ai-brain", "production", "observability"],
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": ["5s", "10s", "30s", "1m"]
+  },
+  "timezone": "browser",
+  "title": "AI Brain Production Overview",
+  "uid": "ai-brain-overview",
+  "version": 1
+}

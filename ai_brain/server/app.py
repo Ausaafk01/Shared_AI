@@ -11,12 +11,15 @@ Configures:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
-from fastapi import FastAPI, HTTPException, Request, status
+import re
+import time
+from contextlib import asynccontextmanager
+from typing import Any, AsyncGenerator, Dict, Optional
+from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from ai_brain.auth.exceptions import (
     AuthenticationError,
@@ -32,8 +35,10 @@ from ai_brain.auth.exceptions import (
     UserNotFoundError,
 )
 from ai_brain.config import AppConfig, load_config_from_env
+from ai_brain.observability.metrics import get_metrics_registry
 from ai_brain.server.dependencies import (
     BrainServiceContainer,
+    create_container_from_config,
     create_sqlite_container,
 )
 from ai_brain.server.limiter import HttpRateLimiter, RateLimitMiddleware
@@ -57,6 +62,22 @@ from ai_brain.server.schemas import (
 
 logger = logging.getLogger("ai_brain.server.app")
 
+_UUID_PATH_PATTERN = re.compile(r"/[a-f0-9-]{8,}")
+_PROJ_PATH_PATTERN = re.compile(r"/projects/[^/]+")
+_MEM_PATH_PATTERN = re.compile(r"/memories/[^/]+")
+_INT_PATH_PATTERN = re.compile(r"/interactions/[^/]+")
+_SESS_PATH_PATTERN = re.compile(r"/sessions/[^/]+")
+
+
+def _normalize_path_for_metrics(path: str) -> str:
+    """Normalize path parameter values to avoid Prometheus label cardinality explosion."""
+    norm = _PROJ_PATH_PATTERN.sub("/projects/{project_id}", path)
+    norm = _MEM_PATH_PATTERN.sub("/memories/{memory_id}", norm)
+    norm = _INT_PATH_PATTERN.sub("/interactions/{interaction_id}", norm)
+    norm = _SESS_PATH_PATTERN.sub("/sessions/{session_id}", norm)
+    norm = _UUID_PATH_PATTERN.sub("/{id}", norm)
+    return norm
+
 
 def create_app(
     container: Optional[BrainServiceContainer] = None,
@@ -65,6 +86,16 @@ def create_app(
 ) -> FastAPI:
     """Create and configure the production FastAPI application."""
     app_cfg = config or load_config_from_env()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+        yield
+        container = getattr(app.state, "container", None)
+        if container and hasattr(container, "close"):
+            try:
+                container.close()
+            except Exception:
+                pass
 
     app = FastAPI(
         title="AI Brain REST API",
@@ -77,12 +108,40 @@ def create_app(
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",
+        lifespan=lifespan,
     )
 
     # 1. Initialize and attach service container
-    resolved_container = container or create_sqlite_container(config=app_cfg)
+    resolved_container = container or create_container_from_config(config=app_cfg)
     app.state.container = resolved_container
     app.state.limiter = limiter
+
+    # Prometheus metrics recording middleware
+    @app.middleware("http")
+    async def prometheus_metrics_middleware(request: Request, call_next: Any) -> Response:
+        start_time = time.perf_counter()
+        registry = get_metrics_registry()
+        method = request.method
+        path = request.url.path
+
+        try:
+            response = await call_next(request)
+            duration = time.perf_counter() - start_time
+            norm_endpoint = _normalize_path_for_metrics(path)
+            status_code = str(response.status_code)
+
+            registry.http_requests_total.inc(method=method, endpoint=norm_endpoint, status_code=status_code)
+            registry.http_request_duration_seconds.observe(duration, method=method, endpoint=norm_endpoint)
+            if response.status_code >= 400:
+                registry.http_errors_total.inc(method=method, endpoint=norm_endpoint, error_type=status_code)
+            return response
+        except Exception as exc:
+            duration = time.perf_counter() - start_time
+            norm_endpoint = _normalize_path_for_metrics(path)
+            registry.http_requests_total.inc(method=method, endpoint=norm_endpoint, status_code="500")
+            registry.http_request_duration_seconds.observe(duration, method=method, endpoint=norm_endpoint)
+            registry.http_errors_total.inc(method=method, endpoint=norm_endpoint, error_type=exc.__class__.__name__)
+            raise exc
 
     # 2. Add Security & Tracing Middleware (Order: Last added runs first)
     # General HTTP rate limiting (token bucket)
@@ -148,6 +207,43 @@ def create_app(
             backend=backend_str,
             database="connected",
         )
+
+    # Health and readiness aliases
+    app.add_api_route("/health", healthz, response_model=HealthResponse, tags=["System"], include_in_schema=False)
+    app.add_api_route("/ready", readyz, response_model=ReadyResponse, tags=["System"], include_in_schema=False)
+
+    @app.get(
+        "/metrics",
+        response_class=PlainTextResponse,
+        tags=["System"],
+        summary="Prometheus Metrics Endpoint",
+    )
+    async def metrics_endpoint() -> Response:
+        registry = get_metrics_registry()
+        c = getattr(app.state, "container", None)
+        if c:
+            is_db_ok = 1.0
+            if c.db_manager:
+                try:
+                    with c.db_manager.connection() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute("SELECT 1;")
+                except Exception:
+                    is_db_ok = 0.0
+            registry.database_connected.set(is_db_ok)
+            registry.app_ready.set(1.0 if is_db_ok == 1.0 else 0.0)
+
+            if c.task_store:
+                try:
+                    stats = c.task_store.get_queue_stats()
+                    registry.task_queue_depth.set(stats.get("pending", 0), status="PENDING")
+                    registry.task_queue_depth.set(stats.get("processing", 0), status="PROCESSING")
+                    registry.task_dead_letter_total.set(stats.get("failed", 0))
+                except Exception:
+                    pass
+
+        content = registry.generate_exposition()
+        return Response(content=content, media_type="text/plain; version=0.0.4; charset=utf-8")
 
     # 5. Global Exception Handlers Mapping Domain Errors to Clean HTTP Responses
     @app.exception_handler(HTTPException)

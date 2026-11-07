@@ -350,6 +350,31 @@ def create_postgres_container(
     )
 
 
+def create_container_from_config(config: Optional[AppConfig] = None) -> BrainServiceContainer:
+    """Factory creating the appropriate BrainServiceContainer based on AppConfig."""
+    app_cfg = config or load_config_from_env()
+    if app_cfg.db.is_postgres:
+        db_manager = DatabaseConnectionManager(app_cfg.db)
+        return create_postgres_container(
+            db_manager=db_manager,
+            config=app_cfg,
+            secret_key=app_cfg.security.jwt_secret_key or "default-postgres-secret-key-32b-length!",
+        )
+    else:
+        db_path = ":memory:"
+        if app_cfg.db.database_url.startswith("sqlite:///"):
+            db_path = app_cfg.db.database_url[len("sqlite:///"):]
+            if not db_path:
+                db_path = ":memory:"
+        elif app_cfg.db.database_url == ":memory:":
+            db_path = ":memory:"
+        return create_sqlite_container(
+            db_path=db_path,
+            config=app_cfg,
+            secret_key=app_cfg.security.jwt_secret_key or "default-sqlite-secret-key-32b-length!!",
+        )
+
+
 # =============================================================================
 # FastAPI Dependency Callables
 # =============================================================================

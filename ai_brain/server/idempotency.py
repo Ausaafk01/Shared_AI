@@ -839,8 +839,11 @@ class SQLiteIdempotencyCoordinator(BaseIdempotencyCoordinator):
             )
             self._init_schema(self._shared_conn)
         else:
-            with sqlite3.connect(self.database_path, timeout=10.0) as conn:
+            conn = sqlite3.connect(self.database_path, timeout=10.0)
+            try:
                 self._init_schema(conn)
+            finally:
+                conn.close()
 
     def _init_schema(self, conn: sqlite3.Connection) -> None:
         conn.execute("""

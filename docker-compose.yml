@@ -1,0 +1,163 @@
+services:
+  # ===========================================================================
+  # 1. PostgreSQL with pgvector extension
+  # ===========================================================================
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: ai-brain-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ai_brain}
+      POSTGRES_USER: ${POSTGRES_USER:-ai_brain_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ai_brain_secure_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ai_brain_user} -d ${POSTGRES_DB:-ai_brain}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - ai_brain_network
+
+  # ===========================================================================
+  # 2. Database Migration Runner (One-Shot, Eliminates Migration Races)
+  # ===========================================================================
+  migration:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-brain-migration
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ai_brain_user}:${POSTGRES_PASSWORD:-ai_brain_secure_password}@postgres:5432/${POSTGRES_DB:-ai_brain}
+      AI_BRAIN_STORAGE_BACKEND: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - ai_brain_network
+
+  # ===========================================================================
+  # 3. AI Brain REST API & Streaming Service
+  # ===========================================================================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-brain-api
+    command: ["uvicorn", "ai_brain.server.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ai_brain_user}:${POSTGRES_PASSWORD:-ai_brain_secure_password}@postgres:5432/${POSTGRES_DB:-ai_brain}
+      AI_BRAIN_STORAGE_BACKEND: postgres
+      AI_BRAIN_JWT_SECRET: ${AI_BRAIN_JWT_SECRET:-default-change-me-in-production-32b!}
+      AI_BRAIN_DEFAULT_PROJECT_ID: ${AI_BRAIN_DEFAULT_PROJECT_ID:-default}
+      AI_BRAIN_ENV: production
+      AI_BRAIN_LOG_FORMAT: json
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks:
+      - ai_brain_network
+
+  # ===========================================================================
+  # 4. AI Brain Background Worker Fleet
+  # ===========================================================================
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-brain-worker
+    command: ["python", "-m", "ai_brain.tasks.cli", "run"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ai_brain_user}:${POSTGRES_PASSWORD:-ai_brain_secure_password}@postgres:5432/${POSTGRES_DB:-ai_brain}
+      AI_BRAIN_STORAGE_BACKEND: postgres
+      AI_BRAIN_WORKER_CONCURRENCY: ${AI_BRAIN_WORKER_CONCURRENCY:-4}
+      AI_BRAIN_LEASE_DURATION: ${AI_BRAIN_LEASE_DURATION:-300}
+      AI_BRAIN_POLL_INTERVAL: ${AI_BRAIN_POLL_INTERVAL:-1.0}
+      AI_BRAIN_DEFAULT_PROJECT_ID: ${AI_BRAIN_DEFAULT_PROJECT_ID:-default}
+      AI_BRAIN_ENV: production
+      AI_BRAIN_LOG_FORMAT: json
+    healthcheck:
+      test: ["CMD", "python", "-m", "ai_brain.tasks.cli", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks:
+      - ai_brain_network
+
+  # ===========================================================================
+  # 5. Prometheus Observability Scraper
+  # ===========================================================================
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: ai-brain-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - api
+    restart: unless-stopped
+    networks:
+      - ai_brain_network
+
+  # ===========================================================================
+  # 6. Grafana Visualization Dashboard
+  # ===========================================================================
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: ai-brain-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - ai_brain_network
+
+volumes:
+  postgres_data:
+    name: ai_brain_postgres_data
+  prometheus_data:
+    name: ai_brain_prometheus_data
+  grafana_data:
+    name: ai_brain_grafana_data
+
+networks:
+  ai_brain_network:
+    name: ai_brain_network
+    driver: bridge

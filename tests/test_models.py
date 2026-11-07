@@ -5,11 +5,23 @@ Automated tests for the Event model, immutability, validation, and serialization
 from dataclasses import FrozenInstanceError
 from datetime import datetime, timezone, timedelta
 import json
+from types import MappingProxyType
 import unittest
 
+import ai_brain.common
+import ai_brain.common.freeze
+from ai_brain.common.freeze import _freeze_container, _unfreeze_container
+import ai_brain.context.models
+import ai_brain.events.models
 from ai_brain.events.exceptions import EventValidationError
 from ai_brain.events.models import Event
 from ai_brain.events.types import EventType
+import ai_brain.graph.models
+import ai_brain.loop.models
+import ai_brain.memories.conflicts.models
+import ai_brain.memories.models
+import ai_brain.retrieval.models
+import ai_brain.vectors.models
 
 
 class TestEventModel(unittest.TestCase):
@@ -262,6 +274,132 @@ class TestEventModel(unittest.TestCase):
 
         with self.assertRaises(EventValidationError):
             Event.from_json(12345)  # type: ignore
+
+
+class TestContainerImmutabilityAndFreezing(unittest.TestCase):
+    """Tests covering container freezing, unfreezing, immutability, and multi-module compatibility."""
+
+    def test_nested_dictionaries_containing_lists_and_tuples(self) -> None:
+        source = {
+            "top_key": "top_val",
+            "nested_dict": {"inner_key": [1, 2, 3]},
+            "nested_list": [{"a": 1}, (4, 5, [6, 7])],
+        }
+        frozen = _freeze_container(source)
+        self.assertIsInstance(frozen, MappingProxyType)
+        self.assertIsInstance(frozen["nested_dict"], MappingProxyType)
+        self.assertIsInstance(frozen["nested_dict"]["inner_key"], tuple)
+        self.assertEqual(frozen["nested_dict"]["inner_key"], (1, 2, 3))
+        self.assertIsInstance(frozen["nested_list"], tuple)
+        self.assertIsInstance(frozen["nested_list"][0], MappingProxyType)
+        self.assertIsInstance(frozen["nested_list"][1], tuple)
+        self.assertIsInstance(frozen["nested_list"][1][2], tuple)
+
+    def test_sets_containing_hashable_scalar_elements(self) -> None:
+        source = {1, 2, "alpha", (10, 20)}
+        frozen = _freeze_container(source)
+        self.assertIsInstance(frozen, frozenset)
+        self.assertEqual(frozen, frozenset({1, 2, "alpha", (10, 20)}))
+
+    def test_frozensets_preservation(self) -> None:
+        source = frozenset(["x", "y", "z"])
+        frozen = _freeze_container(source)
+        self.assertIsInstance(frozen, frozenset)
+        self.assertEqual(frozen, source)
+
+    def test_mixed_nested_structures(self) -> None:
+        source = {
+            "tags": {"tag1", "tag2"},
+            "counts": [10, 20],
+            "frozen_meta": frozenset([1, 2]),
+            "sub": {"enabled": True, "ratio": 3.14, "empty_list": []},
+        }
+        frozen = _freeze_container(source)
+        self.assertIsInstance(frozen["tags"], frozenset)
+        self.assertIsInstance(frozen["counts"], tuple)
+        self.assertIsInstance(frozen["frozen_meta"], frozenset)
+        self.assertIsInstance(frozen["sub"], MappingProxyType)
+        self.assertIsInstance(frozen["sub"]["empty_list"], tuple)
+        self.assertEqual(frozen["sub"]["enabled"], True)
+        self.assertEqual(frozen["sub"]["ratio"], 3.14)
+
+    def test_mutation_attempts_fail_at_all_immutable_levels(self) -> None:
+        source = {
+            "config": {"setting": "active"},
+            "items": ["a", "b"],
+            "unique": {1, 2},
+        }
+        frozen = _freeze_container(source)
+        # Top-level dict mutation fails
+        with self.assertRaises(TypeError):
+            frozen["config"] = {}  # type: ignore
+        with self.assertRaises(TypeError):
+            frozen["new_key"] = 123  # type: ignore
+
+        # Nested dict mutation fails
+        with self.assertRaises(TypeError):
+            frozen["config"]["setting"] = "disabled"  # type: ignore
+
+        # Tuple mutation fails
+        with self.assertRaises(TypeError):
+            frozen["items"][0] = "c"  # type: ignore
+        self.assertFalse(hasattr(frozen["items"], "append"))
+
+        # Frozenset mutation fails
+        self.assertFalse(hasattr(frozen["unique"], "add"))
+        self.assertFalse(hasattr(frozen["unique"], "remove"))
+
+    def test_freeze_unfreeze_round_trips(self) -> None:
+        source = {
+            "name": "project",
+            "tags": ["a", "b"],
+            "metrics": [1, 2, 3],
+            "nested": {"threshold": 0.95, "flags": [True, False]},
+        }
+        frozen = _freeze_container(source)
+        unfrozen = _unfreeze_container(frozen)
+
+        self.assertIsInstance(unfrozen, dict)
+        self.assertIsInstance(unfrozen["tags"], list)
+        self.assertIsInstance(unfrozen["metrics"], list)
+        self.assertIsInstance(unfrozen["nested"], dict)
+        self.assertIsInstance(unfrozen["nested"]["flags"], list)
+        self.assertEqual(unfrozen, source)
+
+        # Mutate unfrozen copy to prove independence
+        unfrozen["nested"]["flags"].append(True)
+        self.assertEqual(len(unfrozen["nested"]["flags"]), 3)
+        self.assertEqual(len(frozen["nested"]["flags"]), 2)
+
+    def test_compatibility_across_all_eight_model_modules(self) -> None:
+        modules = [
+            ai_brain.common,
+            ai_brain.common.freeze,
+            ai_brain.context.models,
+            ai_brain.events.models,
+            ai_brain.graph.models,
+            ai_brain.loop.models,
+            ai_brain.memories.conflicts.models,
+            ai_brain.memories.models,
+            ai_brain.retrieval.models,
+            ai_brain.vectors.models,
+        ]
+
+        test_data = {"key": [1, 2, {"k": 3}], "items": ["x", "y"]}
+
+        for mod in modules:
+            self.assertTrue(hasattr(mod, "_freeze_container"), f"{mod.__name__} missing _freeze_container")
+            self.assertTrue(hasattr(mod, "_unfreeze_container"), f"{mod.__name__} missing _unfreeze_container")
+
+            # Check identity with canonical implementation
+            self.assertIs(mod._freeze_container, _freeze_container, f"{mod.__name__}._freeze_container not canonical")
+            self.assertIs(mod._unfreeze_container, _unfreeze_container, f"{mod.__name__}._unfreeze_container not canonical")
+
+            # Test execution from module re-export
+            f = mod._freeze_container(test_data)
+            self.assertIsInstance(f, MappingProxyType)
+            u = mod._unfreeze_container(f)
+            self.assertEqual(u, test_data)
 
 
 if __name__ == "__main__":

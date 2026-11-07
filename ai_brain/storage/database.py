@@ -330,6 +330,22 @@ class DatabaseConnectionManager:
             if manage_checkout:
                 self.return_connection(active_conn)
 
+    def ensure_project_exists(self, project_id: str) -> None:
+        """Ensure parent project exists in projects table to satisfy FK constraints."""
+        if not project_id:
+            return
+        with self.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO projects (project_id, name)
+                    VALUES (%s, %s)
+                    ON CONFLICT (project_id) DO NOTHING;
+                    """,
+                    (project_id, project_id),
+                )
+            conn.commit()
+
     def execute_script(self, sql_script: str, conn: Optional[Any] = None) -> None:
         """Execute a multi-statement SQL script within a single transaction."""
         with self.transaction(conn=conn) as c:

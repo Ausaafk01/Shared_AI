@@ -20,19 +20,7 @@ logger = logging.getLogger(__name__)
 
 def ensure_project_exists(db: DatabaseConnectionManager, project_id: str) -> None:
     """Ensure parent project exists in projects table to satisfy FK constraints."""
-    if not project_id:
-        return
-    with db.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO projects (project_id, name)
-                VALUES (%s, %s)
-                ON CONFLICT (project_id) DO NOTHING;
-                """,
-                (project_id, project_id),
-            )
-        conn.commit()
+    db.ensure_project_exists(project_id)
 
 
 class PostgreSQLMemoryStore(MemoryStore):

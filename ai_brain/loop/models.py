@@ -19,24 +19,7 @@ from ai_brain.retrieval.models import QueryFilters, RetrievalResponse
 from ai_brain.retrieval.types import RetrievalMethod, normalize_retrieval_method
 
 
-def _freeze_container(data: Any) -> Any:
-    """Recursively freeze dicts and sequences for immutability."""
-    if isinstance(data, (dict, MappingProxyType)):
-        return MappingProxyType({k: _freeze_container(v) for k, v in data.items()})
-    elif isinstance(data, (list, tuple)):
-        return tuple(_freeze_container(v) for v in data)
-    elif isinstance(data, (set, frozenset)):
-        return frozenset(_freeze_container(v) for v in data)
-    return data
-
-
-def _unfreeze_container(data: Any) -> Any:
-    """Recursively unfreeze containers for serialization."""
-    if isinstance(data, (MappingProxyType, dict)):
-        return {k: _unfreeze_container(v) for k, v in data.items()}
-    elif isinstance(data, (tuple, list, frozenset, set)):
-        return [_unfreeze_container(v) for v in data]
-    return data
+from ai_brain.common.freeze import _freeze_container, _unfreeze_container
 
 
 def _json_serializer(obj: Any) -> Any:

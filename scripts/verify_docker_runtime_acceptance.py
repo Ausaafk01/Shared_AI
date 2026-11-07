@@ -402,9 +402,15 @@ def run_acceptance(clean_volumes: bool = False) -> int:
         run_cmd(["docker", "compose", "kill", "worker"])
         logger.info("Worker container terminated during active task execution.")
 
-        # Verify task is currently locked in PostgreSQL
-        db_status = query_postgres(
-            f"SELECT status FROM background_tasks WHERE task_id = '{crash_task_id}';"
+        # Verify task is currently locked in PostgreSQL and inspect lease metadata
+        db_raw = query_postgres(
+            f"SELECT task_id || '|' || status || '|' || COALESCE(locked_by, 'none') || '|' || COALESCE(locked_until::text, 'none') || '|' || retry_count || '|' || (NOW() AT TIME ZONE 'utc')::text FROM background_tasks WHERE task_id = '{crash_task_id}';"
+        )
+        parts = db_raw.split("|")
+        tid, db_status, locked_by, locked_until, retry_count, now_utc = parts
+        logger.info(
+            "Database state immediately after worker kill: task_id=%s, status=%s, locked_by=%s, locked_until=%s, retry_count=%s, current_time=%s",
+            tid, db_status, locked_by, locked_until, retry_count, now_utc,
         )
         assert db_status == "PROCESSING", f"Expected PROCESSING in DB, got: {db_status}"
         logger.info("Database confirms task '%s' was abandoned in PROCESSING state by dead worker.", crash_task_id)
@@ -419,14 +425,35 @@ def run_acceptance(clean_volumes: bool = False) -> int:
         # Wait for replacement worker to reclaim task and complete it
         start_wait = time.time()
         recovered = False
+        last_log_time = 0.0
         while time.time() - start_wait < 45.0:
             status, get_res, _ = http_get(f"{API_BASE}/api/v1/projects/default/tasks/{crash_task_id}", headers=api_hdrs)
             if status == 200:
                 t_json = json.loads(get_res)
-                if t_json["status"] == "COMPLETED":
+                curr_status = t_json.get("status")
+                curr_worker = t_json.get("locked_by")
+                curr_retries = t_json.get("retry_count")
+                if curr_status == "COMPLETED":
                     recovered = True
+                    logger.info("Task recovery successful! Final status: COMPLETED, worker: %s, retry_count: %s", curr_worker, curr_retries)
                     break
+
+                if time.time() - last_log_time >= 2.0:
+                    db_state_poll = query_postgres(
+                        f"SELECT status || '|' || COALESCE(locked_by, 'none') || '|' || COALESCE(locked_until::text, 'none') || '|' || retry_count || '|' || (NOW() AT TIME ZONE 'utc')::text FROM background_tasks WHERE task_id = '{crash_task_id}';"
+                    )
+                    logger.info(
+                        "Awaiting task recovery (elapsed: %.1fs): API status=%s | DB state: %s",
+                        time.time() - start_wait, curr_status, db_state_poll,
+                    )
+                    last_log_time = time.time()
             time.sleep(1.0)
+
+        if not recovered:
+            final_db_state = query_postgres(
+                f"SELECT status || '|' || COALESCE(locked_by, 'none') || '|' || COALESCE(locked_until::text, 'none') || '|' || retry_count || '|' || (NOW() AT TIME ZONE 'utc')::text FROM background_tasks WHERE task_id = '{crash_task_id}';"
+            )
+            logger.error("Recovery timed out after 45s. Final PostgreSQL state: %s", final_db_state)
 
         assert recovered, "Replacement worker failed to recover and complete crash-recovery task"
         logger.info("Replacement worker claimed abandoned task and successfully completed it.")
@@ -476,6 +503,20 @@ def run_acceptance(clean_volumes: bool = False) -> int:
         assert persisted_json["status"] == "COMPLETED"
         logger.info("PostgreSQL persistence verified across container restarts.")
 
+    except Exception as exc:
+        logger.error("Acceptance test failed with error: %s", exc)
+        try:
+            logger.info("=== DUMPING WORKER CONTAINER LOGS ON FAILURE ===")
+            w_out, _ = run_cmd(["docker", "compose", "logs", "--tail=200", "worker"])
+            for line in w_out.splitlines():
+                logger.error("[WORKER LOG] %s", line)
+            logger.info("=== DUMPING API CONTAINER LOGS ON FAILURE ===")
+            api_out, _ = run_cmd(["docker", "compose", "logs", "--tail=100", "api"])
+            for line in api_out.splitlines():
+                logger.error("[API LOG] %s", line)
+        except Exception as dump_err:
+            logger.warning("Failed to dump container logs: %s", dump_err)
+        raise
     finally:
         # 11. Graceful Shutdown (Default: Non-destructive 'docker compose down'; -v requires opt-in)
         logger.info("[Step 11] Performing graceful shutdown (clean_volumes=%s)...", clean_volumes)

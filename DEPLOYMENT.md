@@ -214,7 +214,7 @@ docker compose down
 Docker signals `SIGTERM` to `api` and `worker`. The `WorkerFleet` stops claiming new tasks and waits up to 10 seconds for active tasks to complete or safely release their leases.
 
 ### Worker Crash Recovery
-If a worker container crashes or is forcibly terminated (`SIGKILL`), its active task leases expire automatically after `AI_BRAIN_LEASE_DURATION` (default: 300 seconds). Surviving workers automatically reclaim expired tasks, and atomic fencing tokens prevent zombie workers from writing stale updates.
+If a worker container crashes or is forcibly terminated (`SIGKILL`), its active task leases expire automatically after `AI_BRAIN_LEASE_DURATION` (default: 10 seconds). Surviving workers automatically reclaim expired tasks, and atomic fencing tokens prevent zombie workers from writing stale updates.
 
 ---
 

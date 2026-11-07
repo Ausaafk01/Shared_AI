@@ -563,6 +563,76 @@ class TestContainerFactoryAndConfiguration(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_token_structure('{"token": "xyz"}')
 
+    def test_worker_lease_and_failover_timing_configuration(self) -> None:
+        """Verify failover-compatible worker lease duration and deterministic abandoned task recovery."""
+        from ai_brain.config import WorkerConfig, load_config_from_env
+        from ai_brain.tasks.models import TaskStatus
+
+        # 1. Config defaults verification: lease duration must be failover-compatible (<= 30s)
+        cfg = load_config_from_env()
+        self.assertLessEqual(cfg.worker.lease_duration_seconds, 30, "Default lease duration must be <= 30s for failover compatibility")
+        self.assertEqual(cfg.worker.lease_duration_seconds, 10)
+        self.assertLess(cfg.worker.heartbeat_interval_seconds, cfg.worker.lease_duration_seconds)
+        self.assertEqual(cfg.worker.heartbeat_interval_seconds, 3)
+
+        # 2. docker-compose.yml configuration verification
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        compose_path = os.path.join(project_root, "docker-compose.yml")
+        with open(compose_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("AI_BRAIN_LEASE_DURATION: ${AI_BRAIN_LEASE_DURATION:-10}", content)
+
+        # 3. Deterministic abandoned task recovery verification
+        container = create_sqlite_container()
+        try:
+            task_store = container.task_store
+            project_id = "test_failover_proj"
+            task_type = "interaction_execution"
+
+            # Worker 1 claims task with short 0.2s lease and crashes
+            submitted = task_store.submit_task(
+                project_id=project_id,
+                task_type=task_type,
+                payload={"input": "failover test"},
+            )
+            c1 = task_store.claim_next_task(project_id, "worker_dead", lease_seconds=0.2)
+            self.assertIsNotNone(c1)
+            self.assertEqual(c1.locked_by, "worker_dead")
+            self.assertEqual(c1.status, TaskStatus.PROCESSING)
+            self.assertEqual(c1.retry_count, 0)
+
+            # Before lease expires, another worker cannot claim it
+            c_early = task_store.claim_next_task(project_id, "worker_replacement", lease_seconds=1.0)
+            self.assertIsNone(c_early, "Unexpired task lease must not be claimed")
+
+            # Sleep to allow lease expiry
+            time.sleep(0.3)
+
+            # Replacement worker reclaims the expired task
+            c2 = task_store.claim_next_task(project_id, "worker_replacement", lease_seconds=2.0)
+            self.assertIsNotNone(c2, "Expired task lease must be claimed by replacement worker")
+            self.assertEqual(c2.task_id, submitted.task_id)
+            self.assertEqual(c2.locked_by, "worker_replacement")
+            self.assertEqual(c2.retry_count, 1)
+
+            # Replacement worker completes task
+            completed = task_store.complete_task(
+                project_id=project_id,
+                task_id=c2.task_id,
+                worker_id="worker_replacement",
+                result_payload={"status": "recovered"},
+            )
+            self.assertEqual(completed.status, TaskStatus.COMPLETED)
+            self.assertIsNone(completed.locked_by)
+
+            # Verified in store
+            final_record = task_store.get_task(project_id, submitted.task_id)
+            self.assertIsNotNone(final_record)
+            self.assertEqual(final_record.status, TaskStatus.COMPLETED)
+            self.assertEqual(final_record.retry_count, 1)
+        finally:
+            container.close()
+
 
 class TestDockerRuntimeExecution(unittest.TestCase):
     """Runtime tests executed if Docker CLI and daemon are installed on the host."""

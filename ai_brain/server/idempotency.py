@@ -55,16 +55,9 @@ def _resolve_existing_record(
     store: InteractionStore, idempotency_key: str, project_id: str, interaction_id: Optional[str] = None
 ) -> Optional[InteractionRecord]:
     """Helper to safely retrieve an existing interaction record by key or ID with project scope."""
-    rec: Optional[InteractionRecord] = None
-    try:
-        rec = store.get_by_idempotency_key(idempotency_key, project_id=project_id)
-    except TypeError:
-        rec = store.get_by_idempotency_key(idempotency_key)
+    rec = store.get_by_idempotency_key(idempotency_key, project_id=project_id)
     if rec is None and interaction_id:
-        try:
-            rec = store.get(interaction_id, project_id=project_id)
-        except TypeError:
-            rec = store.get(interaction_id)
+        rec = store.get(interaction_id, project_id=project_id)
     return rec
 
 

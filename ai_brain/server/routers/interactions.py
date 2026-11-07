@@ -79,10 +79,7 @@ async def prepare_interaction(
 
     # Check for existing idempotency key match
     if payload.idempotency_key:
-        try:
-            existing = container.interaction_store.get_by_idempotency_key(payload.idempotency_key)
-        except TypeError:
-            existing = container.interaction_store.get_by_idempotency_key(payload.idempotency_key, project_id=project_id)
+        existing = container.interaction_store.get_by_idempotency_key(payload.idempotency_key, project_id=project_id)
         if existing and existing.project_id == project_id:
             # Check for conflict: different input payload
             input_content = existing.input.content if existing.input else ""
@@ -381,10 +378,7 @@ async def stream_interaction(
         existing_record = reservation.existing_record
         interaction_id = existing_record.interaction_id if existing_record else reservation.interaction_id
         if existing_record is None and reservation.status == IdempotencyStatus.COMPLETED:
-            try:
-                existing_record = container.interaction_store.get(reservation.interaction_id, project_id=project_id)
-            except TypeError:
-                existing_record = container.interaction_store.get(reservation.interaction_id)
+            existing_record = container.interaction_store.get(reservation.interaction_id, project_id=project_id)
 
         # Start periodic heartbeat renewal independently while execution is active
         if reservation.status != IdempotencyStatus.COMPLETED:

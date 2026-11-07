@@ -186,10 +186,7 @@ class BrainLoop:
         self, interaction_id: str, project_id: Optional[str] = None
     ) -> Optional[InteractionRecord]:
         """Look up an interaction record by ID from persistent storage."""
-        try:
-            return self.interaction_store.get(interaction_id, project_id=project_id)
-        except TypeError:
-            return self.interaction_store.get(interaction_id)
+        return self.interaction_store.get(interaction_id, project_id=project_id)
 
     def list_interactions(
         self,
@@ -254,19 +251,13 @@ class BrainLoop:
         # Idempotency lookup
         existing_record: Optional[InteractionRecord] = None
         if processed_input.idempotency_key:
-            try:
-                existing_record = self.interaction_store.get_by_idempotency_key(
-                    processed_input.idempotency_key, project_id=processed_input.project_id
-                )
-            except TypeError:
-                existing_record = self.interaction_store.get_by_idempotency_key(processed_input.idempotency_key)
+            existing_record = self.interaction_store.get_by_idempotency_key(
+                processed_input.idempotency_key, project_id=processed_input.project_id
+            )
         elif processed_input.interaction_id:
-            try:
-                existing_record = self.interaction_store.get(
-                    processed_input.interaction_id, project_id=processed_input.project_id
-                )
-            except TypeError:
-                existing_record = self.interaction_store.get(processed_input.interaction_id)
+            existing_record = self.interaction_store.get(
+                processed_input.interaction_id, project_id=processed_input.project_id
+            )
 
         if existing_record is not None:
             # Check payload match
@@ -465,10 +456,7 @@ class BrainLoop:
         iid = response_input.interaction_id
         record = self.interaction_store.get(iid)
         if record is None:
-            try:
-                record = self.interaction_store.get(iid, project_id=response_input.project_id)
-            except TypeError:
-                pass
+            record = self.interaction_store.get(iid, project_id=response_input.project_id)
 
         # Idempotency check: if already completed, verify payload and return existing result
         if record and record.status in (InteractionStatus.COMPLETED, InteractionStatus.PARTIAL_SUCCESS):

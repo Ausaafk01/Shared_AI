@@ -8,7 +8,10 @@ import os
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
+import uuid
 import warnings
+
+from ai_brain.config import DatabaseConfig, StorageBackend, load_env_file
 
 from ai_brain.context import ContextBuilder, DeterministicTokenizer
 from ai_brain.events import SQLiteEventStore
@@ -48,6 +51,12 @@ from ai_brain.memories import (
     MemoryUpdater,
 )
 from ai_brain.retrieval import RetrievalEngine, RetrievalMethod
+from ai_brain.loop.storage.postgres import PostgreSQLInteractionStore
+from ai_brain.server.idempotency import _resolve_existing_record
+from ai_brain.storage.database import DatabaseConnectionManager
+from ai_brain.tasks.exceptions import TransientTaskError
+from ai_brain.tasks.handlers import handle_interaction_execution
+from ai_brain.tasks.models import TaskRecord
 from ai_brain.vectors import (
     MockEmbeddingProvider,
     SQLiteVectorStore,
@@ -1541,6 +1550,195 @@ class TestBrainLoopReviewAndRecovery(unittest.TestCase):
         ]
         self.assertGreater(len(contradicts_rels), 0)
 
+
+
+class TestInteractionStoreStandardizationAndTypeErrorPropagation(unittest.TestCase):
+    """Verifies that InteractionStore implementations adhere to standardized signatures and propagate genuine TypeErrors."""
+
+    def test_sqlite_interaction_store_standardized_queries(self) -> None:
+        store = SQLiteInteractionStore(":memory:")
+        now = datetime.now(timezone.utc)
+        record = InteractionRecord(
+            interaction_id="int-std-sqlite",
+            project_id="proj-std-1",
+            agent_id="agent-coder",
+            session_id="sess-std-1",
+            idempotency_key="idem-std-sqlite",
+            status=InteractionStatus.CONTEXT_PREPARED,
+            input=AgentInteractionInput(
+                interaction_id="int-std-sqlite",
+                project_id="proj-std-1",
+                agent_id="agent-coder",
+                session_id="sess-std-1",
+                content="test content",
+            ),
+            created_at=now,
+            updated_at=now,
+        )
+        store.save(record)
+
+        # 1. Scoped get with project_id
+        res1 = store.get("int-std-sqlite", project_id="proj-std-1")
+        self.assertIsNotNone(res1)
+        self.assertEqual(res1.interaction_id, "int-std-sqlite")
+
+        # 2. Unscoped get (project_id defaults to None)
+        res2 = store.get("int-std-sqlite")
+        self.assertIsNotNone(res2)
+        self.assertEqual(res2.interaction_id, "int-std-sqlite")
+
+        # 3. Cross-project scoped get returns None
+        self.assertIsNone(store.get("int-std-sqlite", project_id="proj-other"))
+
+        # 4. Scoped get_by_idempotency_key
+        res3 = store.get_by_idempotency_key("idem-std-sqlite", project_id="proj-std-1")
+        self.assertIsNotNone(res3)
+        self.assertEqual(res3.interaction_id, "int-std-sqlite")
+
+        # 5. Unscoped get_by_idempotency_key
+        res4 = store.get_by_idempotency_key("idem-std-sqlite")
+        self.assertIsNotNone(res4)
+        self.assertEqual(res4.interaction_id, "int-std-sqlite")
+
+        # 6. Cross-project get_by_idempotency_key returns None
+        self.assertIsNone(store.get_by_idempotency_key("idem-std-sqlite", project_id="proj-other"))
+        store.close()
+
+    def test_postgres_interaction_store_standardized_queries(self) -> None:
+        load_env_file()
+        admin_url = os.environ.get(
+            "TEST_POSTGRES_ADMIN_URL",
+            os.environ.get("TEST_POSTGRES_URL", "postgresql://postgres@127.0.0.1:5432/test_ai_brain"),
+        )
+        cfg = DatabaseConfig(backend=StorageBackend.POSTGRES, database_url=admin_url, pool_size=3, pool_timeout=3.0)
+        mgr = DatabaseConnectionManager(cfg)
+        if not mgr.driver_available:
+            self.skipTest("PostgreSQL driver not installed")
+        try:
+            conn = mgr.get_connection(timeout=2.0)
+            mgr.return_connection(conn)
+        except Exception as exc:
+            mgr.close()
+            self.skipTest(f"Live PostgreSQL not reachable: {exc}")
+
+        try:
+            proj_id = f"proj_std_{uuid.uuid4().hex[:8]}"
+            store = PostgreSQLInteractionStore(mgr, default_project_id=proj_id)
+            now = datetime.now(timezone.utc)
+            inter_id = f"int_pg_{uuid.uuid4().hex[:8]}"
+            idem_key = f"idem_pg_{uuid.uuid4().hex[:8]}"
+
+            record = InteractionRecord(
+                interaction_id=inter_id,
+                project_id=proj_id,
+                agent_id="agent-coder",
+                session_id=f"sess_{uuid.uuid4().hex[:8]}",
+                idempotency_key=idem_key,
+                status=InteractionStatus.CONTEXT_PREPARED,
+                input=AgentInteractionInput(
+                    interaction_id=inter_id,
+                    project_id=proj_id,
+                    agent_id="agent-coder",
+                    session_id=f"sess_{uuid.uuid4().hex[:8]}",
+                    content="Postgres standard query check",
+                ),
+                created_at=now,
+                updated_at=now,
+            )
+            store.save(record)
+
+            # 1. Scoped get
+            self.assertIsNotNone(store.get(inter_id, project_id=proj_id))
+            # 2. Unscoped get
+            self.assertIsNotNone(store.get(inter_id))
+            # 3. Cross-project get
+            self.assertIsNone(store.get(inter_id, project_id="proj_nonexistent_other"))
+
+            # 4. Scoped get_by_idempotency_key
+            self.assertIsNotNone(store.get_by_idempotency_key(idem_key, project_id=proj_id))
+            # 5. Unscoped get_by_idempotency_key
+            self.assertIsNotNone(store.get_by_idempotency_key(idem_key))
+            # 6. Cross-project get_by_idempotency_key
+            self.assertIsNone(store.get_by_idempotency_key(idem_key, project_id="proj_nonexistent_other"))
+        finally:
+            mgr.close()
+
+    def test_genuine_typeerror_propagates_from_get_interaction(self) -> None:
+        mock_store = MagicMock()
+        mock_store.get.side_effect = TypeError("Genuine internal TypeError inside get()")
+        loop = BrainLoop(
+            event_store=SQLiteEventStore(":memory:"),
+            interaction_store=mock_store,
+        )
+        with self.assertRaises(TypeError) as ctx:
+            loop.get_interaction("int-err-123", project_id="proj-1")
+        self.assertIn("Genuine internal TypeError inside get()", str(ctx.exception))
+        self.assertEqual(mock_store.get.call_count, 1)
+
+    def test_genuine_typeerror_propagates_from_prepare_context(self) -> None:
+        mock_store = MagicMock()
+        mock_store.get_by_idempotency_key.side_effect = TypeError("Genuine internal TypeError in idempotency check")
+        loop = BrainLoop(
+            event_store=SQLiteEventStore(":memory:"),
+            interaction_store=mock_store,
+        )
+        inp = AgentInteractionInput(
+            interaction_id="int-prep-err",
+            project_id="proj-1",
+            agent_id="agent-coder",
+            session_id="sess-1",
+            content="Testing prepare_context with bad store",
+            idempotency_key="key-raise-typeerror",
+        )
+        with self.assertRaises(TypeError) as ctx:
+            loop.prepare_context(inp)
+        self.assertIn("Genuine internal TypeError in idempotency check", str(ctx.exception))
+        self.assertEqual(mock_store.get_by_idempotency_key.call_count, 1)
+
+    def test_genuine_typeerror_propagates_from_complete_interaction(self) -> None:
+        mock_store = MagicMock()
+        mock_store.get.side_effect = TypeError("Genuine internal TypeError in completion lookup")
+        loop = BrainLoop(
+            event_store=SQLiteEventStore(":memory:"),
+            interaction_store=mock_store,
+        )
+        resp = AgentResponseInput(
+            interaction_id="int-comp-err",
+            project_id="proj-1",
+            agent_id="agent-coder",
+            session_id="sess-1",
+            content="Response content",
+        )
+        with self.assertRaises(TypeError) as ctx:
+            loop.complete_interaction(resp)
+        self.assertIn("Genuine internal TypeError in completion lookup", str(ctx.exception))
+
+    def test_genuine_typeerror_propagates_from_resolve_existing_record(self) -> None:
+        mock_store = MagicMock()
+        mock_store.get_by_idempotency_key.side_effect = TypeError("Genuine TypeError from store")
+        with self.assertRaises(TypeError) as ctx:
+            _resolve_existing_record(mock_store, "key-123", "proj-1", "int-123")
+        self.assertIn("Genuine TypeError from store", str(ctx.exception))
+
+    def test_genuine_typeerror_propagates_from_task_handler(self) -> None:
+        mock_store = MagicMock()
+        mock_store.get_by_idempotency_key.side_effect = TypeError("Genuine TypeError in worker handler")
+        mock_context = MagicMock()
+        mock_context.brain_loop.interaction_store = mock_store
+
+        task = TaskRecord(
+            task_id="task_err_123",
+            project_id="proj_worker",
+            task_type="interaction_execution",
+            payload={
+                "input_text": "run task",
+                "idempotency_key": "idem_err_worker",
+            },
+        )
+        with self.assertRaises(TransientTaskError) as ctx:
+            handle_interaction_execution(task, context=mock_context)
+        self.assertIsInstance(ctx.exception.__cause__, TypeError)
+        self.assertIn("Genuine TypeError in worker handler", str(ctx.exception.__cause__))
 
 
 if __name__ == "__main__":

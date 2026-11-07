@@ -664,12 +664,115 @@ class TestContainerFactoryAndConfiguration(unittest.TestCase):
             saved_interaction = container.interaction_store.get("int_multi_mem_001")
             self.assertIsNotNone(saved_interaction)
             self.assertEqual(saved_interaction.idempotency_key, idem_key)
+            self.assertIsNotNone(saved_interaction.input_event_id)
+            self.assertIsNotNone(saved_interaction.response_event_id)
+
+            # Verify that memories point to interaction events via source_event_ids
+            mems = container.memory_store.list(project_id="default")
+            self.assertGreaterEqual(len(mems), 2)
+            event_ids_in_interaction = {saved_interaction.input_event_id, saved_interaction.response_event_id}
+            for m in mems:
+                self.assertTrue(bool(m.source_event_ids), f"Memory {m.memory_id} has empty source_event_ids")
+                self.assertTrue(any(eid in event_ids_in_interaction for eid in m.source_event_ids))
 
             # Verify that re-execution with same idempotency key does not duplicate writes
             res_dup = handle_interaction_execution(exec_task, container)
             self.assertEqual(res_dup.get("status"), "COMPLETED")
             dup_interaction = container.interaction_store.get("int_multi_mem_001")
             self.assertEqual(dup_interaction.interaction_id, "int_multi_mem_001")
+        finally:
+            container.close()
+
+    def test_postgres_memory_event_provenance_lifecycle(self) -> None:
+        """Verify authoritative PostgreSQL event-sourced memory provenance queries used in acceptance harness."""
+        import psycopg
+        from ai_brain.config import DatabaseConfig
+        from ai_brain.storage.database import DatabaseConnectionManager
+        from ai_brain.tasks.models import TaskRecord, TaskStatus
+        from ai_brain.tasks.handlers import handle_interaction_execution
+        from ai_brain.server.dependencies import create_postgres_container
+
+        pg_url = os.environ.get("TEST_POSTGRES_URL", "postgresql://postgres@127.0.0.1:5432/test_ai_brain")
+        try:
+            with psycopg.connect(pg_url) as test_conn:
+                with test_conn.cursor() as cur:
+                    cur.execute("SELECT 1;")
+        except Exception:
+            self.skipTest(f"PostgreSQL not available at {pg_url}")
+
+        db = DatabaseConnectionManager(DatabaseConfig(database_url=pg_url))
+        container = create_postgres_container(db)
+        try:
+            crash_idem_key = f"ci_prov_test_{int(time.time() * 1000)}"
+            crash_int_id = f"int_prov_test_{int(time.time() * 1000)}"
+            crash_sess_id = f"sess_prov_test_{int(time.time() * 1000)}"
+
+            task = TaskRecord(
+                task_id=f"task_{crash_int_id}",
+                project_id="default",
+                task_type="interaction_execution",
+                payload={
+                    "input_text": "Active crash recovery verification: We decided to deploy PostgreSQL with automated lease recovery.",
+                    "session_id": crash_sess_id,
+                    "agent_id": "test-sync-blocker",
+                    "interaction_id": crash_int_id,
+                    "idempotency_key": crash_idem_key,
+                },
+                status=TaskStatus.PROCESSING,
+            )
+            res = handle_interaction_execution(task, container)
+            self.assertEqual(res.get("status"), "COMPLETED")
+
+            with psycopg.connect(pg_url) as conn:
+                with conn.cursor() as cur:
+                    # 1. Distinct contents
+                    cur.execute(
+                        "SELECT COUNT(DISTINCT content) FROM memories WHERE content ILIKE '%automated lease recovery%';"
+                    )
+                    distinct_contents = cur.fetchone()[0]
+                    self.assertGreaterEqual(distinct_contents, 1)
+
+                    # 2. No orphaned memories (all have populated source_event_ids)
+                    cur.execute(
+                        "SELECT COUNT(*) FROM memories WHERE content ILIKE '%automated lease recovery%' "
+                        "AND (metadata->'source_event_ids' IS NULL OR jsonb_array_length(metadata->'source_event_ids') = 0);"
+                    )
+                    orphaned = cur.fetchone()[0]
+                    self.assertEqual(orphaned, 0)
+
+                    # 3. Trace memory source_event_ids to events and verify interaction provenance
+                    cur.execute(
+                        """
+                        SELECT COUNT(DISTINCT e.payload->'metadata'->>'interaction_id'),
+                               MAX(e.payload->'metadata'->>'interaction_id')
+                        FROM memories m
+                        CROSS JOIN LATERAL jsonb_array_elements_text(m.metadata->'source_event_ids') AS src(eid)
+                        JOIN events e ON e.event_id = src.eid
+                        WHERE m.content ILIKE '%%automated lease recovery%%'
+                          AND e.payload->'metadata'->>'interaction_id' = %s;
+                        """,
+                        (crash_int_id,),
+                    )
+                    interaction_matches, matched_id = cur.fetchone()
+                    self.assertEqual(interaction_matches, 1)
+                    self.assertEqual(matched_id, crash_int_id)
+
+                    # 4. Trace session_id
+                    cur.execute(
+                        """
+                        SELECT COUNT(DISTINCT e.session_id),
+                               MAX(e.session_id)
+                        FROM memories m
+                        CROSS JOIN LATERAL jsonb_array_elements_text(m.metadata->'source_event_ids') AS src(eid)
+                        JOIN events e ON e.event_id = src.eid
+                        WHERE m.content ILIKE '%%automated lease recovery%%'
+                          AND e.session_id = %s;
+                        """,
+                        (crash_sess_id,),
+                    )
+                    session_matches, matched_sess = cur.fetchone()
+                    self.assertEqual(session_matches, 1)
+                    self.assertEqual(matched_sess, crash_sess_id)
         finally:
             container.close()
 

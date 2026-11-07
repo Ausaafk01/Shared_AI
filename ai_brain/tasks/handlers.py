@@ -117,9 +117,16 @@ def handle_interaction_execution(task: TaskRecord, context: Any = None) -> Dict[
         )
         comp = context.brain_loop.complete_interaction(resp_input)
 
-        # Persist extracted memories to container memory store if present
+        # Persist extracted and updated memories to container memory store if present
         if hasattr(context, "memory_store") and context.memory_store is not None:
-            for m in comp.extracted_memories:
+            all_mems_to_store: Dict[str, Any] = {m.memory_id: m for m in comp.extracted_memories}
+            if hasattr(comp, "update_results") and comp.update_results:
+                for u in comp.update_results:
+                    if getattr(u, "current_memory", None):
+                        all_mems_to_store[u.current_memory.memory_id] = u.current_memory
+                    for aff in getattr(u, "affected_memories", ()):
+                        all_mems_to_store[aff.memory_id] = aff
+            for m in all_mems_to_store.values():
                 try:
                     context.memory_store.store(m)
                 except Exception as e:

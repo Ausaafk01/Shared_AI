@@ -182,6 +182,7 @@ class PostgreSQLVectorStore(VectorStore):
         version: int,
         content: str,
         status: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Ensure parent project and memory records exist to satisfy foreign keys."""
         with conn.cursor() as cur:
@@ -193,13 +194,15 @@ class PostgreSQLVectorStore(VectorStore):
                 """,
                 (project_id, project_id),
             )
+            meta_json = json.dumps(dict(_unfreeze_container(metadata or {})))
             cur.execute(
                 """
-                INSERT INTO memories (memory_id, project_id, version, content, status)
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (memory_id) DO NOTHING;
+                INSERT INTO memories (memory_id, project_id, version, content, status, metadata)
+                VALUES (%s, %s, %s, %s, %s, %s::jsonb)
+                ON CONFLICT (memory_id) DO UPDATE SET
+                    metadata = CASE WHEN memories.metadata = '{}'::jsonb THEN EXCLUDED.metadata ELSE memories.metadata END;
                 """,
-                (memory_id, project_id, version, content, status),
+                (memory_id, project_id, version, content, status, meta_json),
             )
 
     def add_vector(self, record: VectorRecord, *, fail_if_exists: bool = False) -> VectorRecord:
@@ -226,7 +229,7 @@ class PostgreSQLVectorStore(VectorStore):
         with self.db.tenant_context(proj_id) as conn:
             # Satisfy FK constraints within transaction
             self._ensure_project_and_memory(
-                conn, proj_id, record.memory_id, record.version, record.content, record.status
+                conn, proj_id, record.memory_id, record.version, record.content, record.status, record.metadata
             )
 
             with conn.cursor() as cur:

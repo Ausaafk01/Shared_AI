@@ -478,15 +478,46 @@ def run_acceptance(clean_volumes: bool = False) -> int:
         # 3. Exactly one logical set of memories produced by the recovered interaction
         # Prompt and agent response each yield one distinct decision memory
         mem_distinct_contents = query_postgres(
-            f"SELECT COUNT(DISTINCT content) FROM memories WHERE content ILIKE '%automated lease recovery%';"
+            "SELECT COUNT(DISTINCT content) FROM memories WHERE content ILIKE '%automated lease recovery%';"
         )
         assert mem_distinct_contents == "2", f"Expected exactly 2 distinct memory contents (prompt + response decisions), got: {mem_distinct_contents}"
 
-        # All memory records with interaction metadata belong exclusively to this single interaction
-        mem_interaction_count = query_postgres(
-            f"SELECT COUNT(DISTINCT metadata->>'interaction_id') FROM memories WHERE metadata->>'interaction_id' IS NOT NULL AND content ILIKE '%automated lease recovery%';"
+        # Verify all memories have populated source_event_ids (no orphaned memories)
+        orphaned_mems = query_postgres(
+            "SELECT COUNT(*) FROM memories WHERE content ILIKE '%automated lease recovery%' "
+            "AND (metadata->'source_event_ids' IS NULL OR jsonb_array_length(metadata->'source_event_ids') = 0);"
         )
-        assert mem_interaction_count == "1", f"Expected all memories to originate from single interaction, got: {mem_interaction_count}"
+        assert orphaned_mems == "0", f"Found memories without populated source_event_ids: {orphaned_mems}"
+
+        # Authoritative event-sourced provenance: trace memory source_event_ids to events and verify single interaction provenance
+        mem_interaction_count = query_postgres(
+            "SELECT COUNT(DISTINCT e.payload->'metadata'->>'interaction_id') "
+            "FROM memories m "
+            "CROSS JOIN LATERAL jsonb_array_elements_text(m.metadata->'source_event_ids') AS src(eid) "
+            "JOIN events e ON e.event_id = src.eid "
+            "WHERE m.content ILIKE '%automated lease recovery%';"
+        )
+        assert mem_interaction_count == "1", f"Expected all memories to trace to exactly 1 interaction, got: {mem_interaction_count}"
+
+        matched_interaction_id = query_postgres(
+            "SELECT DISTINCT e.payload->'metadata'->>'interaction_id' "
+            "FROM memories m "
+            "CROSS JOIN LATERAL jsonb_array_elements_text(m.metadata->'source_event_ids') AS src(eid) "
+            "JOIN events e ON e.event_id = src.eid "
+            "WHERE m.content ILIKE '%automated lease recovery%';"
+        )
+        assert matched_interaction_id == crash_interaction_id, (
+            f"Memory provenance mismatch: expected interaction '{crash_interaction_id}', got '{matched_interaction_id}'"
+        )
+
+        mem_session_count = query_postgres(
+            "SELECT COUNT(DISTINCT e.session_id) "
+            "FROM memories m "
+            "CROSS JOIN LATERAL jsonb_array_elements_text(m.metadata->'source_event_ids') AS src(eid) "
+            "JOIN events e ON e.event_id = src.eid "
+            "WHERE m.content ILIKE '%automated lease recovery%';"
+        )
+        assert mem_session_count == "1", f"Expected all memory source events to belong to 1 session, got: {mem_session_count}"
 
         # 4. Exactly one corresponding set of lifecycle events (INPUT, CONTEXT, RESPONSE, COMPLETED)
         evt_db_count = query_postgres(
@@ -513,11 +544,20 @@ def run_acceptance(clean_volumes: bool = False) -> int:
         run_cmd(["docker", "compose", "restart", "postgres"])
         wait_for_http(f"{API_BASE}/readyz", expected_status=200, timeout=45.0)
 
-        # Confirm previously completed tasks are still readable and intact
-        status, persisted_res, _ = http_get(f"{API_BASE}/api/v1/projects/default/tasks/{task_id}", headers=api_hdrs)
-        assert status == 200
-        persisted_json = json.loads(persisted_res)
-        assert persisted_json["status"] == "COMPLETED"
+        # Confirm previously completed tasks are still readable and intact with resilient polling
+        start_reconnect = time.time()
+        persisted_ok = False
+        last_status = None
+        persisted_res = ""
+        while time.time() - start_reconnect < 30.0:
+            last_status, persisted_res, _ = http_get(f"{API_BASE}/api/v1/projects/default/tasks/{task_id}", headers=api_hdrs)
+            if last_status == 200:
+                persisted_json = json.loads(persisted_res)
+                if persisted_json.get("status") == "COMPLETED":
+                    persisted_ok = True
+                    break
+            time.sleep(1.0)
+        assert persisted_ok, f"Failed to verify task persistence after postgres restart (status={last_status}): {persisted_res}"
         logger.info("PostgreSQL persistence verified across container restarts.")
 
     except Exception as exc:
@@ -537,7 +577,7 @@ def run_acceptance(clean_volumes: bool = False) -> int:
             logger.error("[DIAGNOSTIC INTERACTIONS]\n%s", sanitize_sensitive_data(ints_dump))
 
             mems_dump = query_postgres(
-                "SELECT memory_id, project_id, status, content, metadata->>'interaction_id', created_at "
+                "SELECT memory_id, project_id, status, content, metadata->'source_event_ids', created_at "
                 "FROM memories ORDER BY created_at DESC LIMIT 10;"
             )
             logger.error("[DIAGNOSTIC MEMORIES]\n%s", sanitize_sensitive_data(mems_dump))

@@ -38,6 +38,9 @@ jobs:
           docker compose config
 
       - name: Execute Docker Runtime Acceptance Test Suite
+        env:
+          AI_BRAIN_LEASE_DURATION: "10"
+          AI_BRAIN_HEARTBEAT_INTERVAL: "3"
         run: |
           python scripts/verify_docker_runtime_acceptance.py
 

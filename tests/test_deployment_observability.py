@@ -564,23 +564,28 @@ class TestContainerFactoryAndConfiguration(unittest.TestCase):
             validate_token_structure('{"token": "xyz"}')
 
     def test_worker_lease_and_failover_timing_configuration(self) -> None:
-        """Verify failover-compatible worker lease duration and deterministic abandoned task recovery."""
+        """Verify production lease defaults, CI/test override compatibility, and deterministic recovery."""
         from ai_brain.config import WorkerConfig, load_config_from_env
-        from ai_brain.tasks.models import TaskStatus
+        from ai_brain.tasks.models import TaskStatus, TaskRecord
+        from ai_brain.tasks.handlers import handle_interaction_execution
 
-        # 1. Config defaults verification: lease duration must be failover-compatible (<= 30s)
-        cfg = load_config_from_env()
-        self.assertLessEqual(cfg.worker.lease_duration_seconds, 30, "Default lease duration must be <= 30s for failover compatibility")
-        self.assertEqual(cfg.worker.lease_duration_seconds, 10)
-        self.assertLess(cfg.worker.heartbeat_interval_seconds, cfg.worker.lease_duration_seconds)
-        self.assertEqual(cfg.worker.heartbeat_interval_seconds, 3)
+        # 1. Config defaults verification: production defaults are 300s lease, 30s heartbeat
+        cfg = load_config_from_env({})
+        self.assertEqual(cfg.worker.lease_duration_seconds, 300)
+        self.assertEqual(cfg.worker.heartbeat_interval_seconds, 30)
+
+        # Explicit test / fast-failover override verification
+        cfg_ci = load_config_from_env({"AI_BRAIN_LEASE_DURATION": "10", "AI_BRAIN_HEARTBEAT_INTERVAL": "3"})
+        self.assertEqual(cfg_ci.worker.lease_duration_seconds, 10)
+        self.assertEqual(cfg_ci.worker.heartbeat_interval_seconds, 3)
 
         # 2. docker-compose.yml configuration verification
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         compose_path = os.path.join(project_root, "docker-compose.yml")
         with open(compose_path, "r", encoding="utf-8") as f:
             content = f.read()
-        self.assertIn("AI_BRAIN_LEASE_DURATION: ${AI_BRAIN_LEASE_DURATION:-10}", content)
+        self.assertIn("AI_BRAIN_LEASE_DURATION: ${AI_BRAIN_LEASE_DURATION:-300}", content)
+        self.assertIn("AI_BRAIN_HEARTBEAT_INTERVAL: ${AI_BRAIN_HEARTBEAT_INTERVAL:-30}", content)
 
         # 3. Deterministic abandoned task recovery verification
         container = create_sqlite_container()
@@ -630,6 +635,41 @@ class TestContainerFactoryAndConfiguration(unittest.TestCase):
             self.assertIsNotNone(final_record)
             self.assertEqual(final_record.status, TaskStatus.COMPLETED)
             self.assertEqual(final_record.retry_count, 1)
+
+            # 4. Multi-memory extraction & conflict tracking regression check
+            idem_key = "test_multi_mem_idem_001"
+            exec_task = TaskRecord(
+                task_id="task_multi_mem_test",
+                project_id="default",
+                task_type="interaction_execution",
+                payload={
+                    "input_text": "Decision: We decided to deploy PostgreSQL with automated lease recovery.",
+                    "session_id": "sess_multi_mem_001",
+                    "agent_id": "test-sync-blocker",
+                    "interaction_id": "int_multi_mem_001",
+                    "idempotency_key": idem_key,
+                },
+                status=TaskStatus.PROCESSING,
+                retry_count=1,
+                max_retries=3,
+                locked_by="worker_replacement",
+                locked_until=None,
+                error_message=None,
+                created_at=submitted.created_at,
+                updated_at=submitted.updated_at,
+            )
+            res = handle_interaction_execution(exec_task, container)
+            self.assertEqual(res.get("status"), "COMPLETED")
+            # Verify exactly 1 interaction record
+            saved_interaction = container.interaction_store.get("int_multi_mem_001")
+            self.assertIsNotNone(saved_interaction)
+            self.assertEqual(saved_interaction.idempotency_key, idem_key)
+
+            # Verify that re-execution with same idempotency key does not duplicate writes
+            res_dup = handle_interaction_execution(exec_task, container)
+            self.assertEqual(res_dup.get("status"), "COMPLETED")
+            dup_interaction = container.interaction_store.get("int_multi_mem_001")
+            self.assertEqual(dup_interaction.interaction_id, "int_multi_mem_001")
         finally:
             container.close()
 

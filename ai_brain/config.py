@@ -91,8 +91,8 @@ class VectorConfig:
 class WorkerConfig:
     """Background task queue and worker fleet configuration."""
     worker_concurrency: int = 4
-    lease_duration_seconds: int = 10
-    heartbeat_interval_seconds: int = 3
+    lease_duration_seconds: int = 300
+    heartbeat_interval_seconds: int = 30
     max_task_retries: int = 3
     poll_interval_seconds: float = 1.0
 
@@ -224,8 +224,8 @@ def load_config_from_env(env: Optional[Dict[str, str]] = None) -> AppConfig:
 
     worker_config = WorkerConfig(
         worker_concurrency=_parse_int(e.get("AI_BRAIN_WORKER_CONCURRENCY"), 4),
-        lease_duration_seconds=_parse_int(e.get("AI_BRAIN_LEASE_DURATION"), 10),
-        heartbeat_interval_seconds=_parse_int(e.get("AI_BRAIN_HEARTBEAT_INTERVAL"), 3),
+        lease_duration_seconds=_parse_int(e.get("AI_BRAIN_LEASE_DURATION"), 300),
+        heartbeat_interval_seconds=_parse_int(e.get("AI_BRAIN_HEARTBEAT_INTERVAL"), 30),
         max_task_retries=_parse_int(e.get("AI_BRAIN_MAX_TASK_RETRIES"), 3),
         poll_interval_seconds=_parse_float(e.get("AI_BRAIN_POLL_INTERVAL"), 1.0),
     )

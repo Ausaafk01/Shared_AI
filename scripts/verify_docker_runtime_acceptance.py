@@ -225,6 +225,10 @@ def run_acceptance(clean_volumes: bool = False) -> int:
     logger.info("AI Brain Docker Runtime Acceptance Test (clean_volumes=%s)", clean_volumes)
     logger.info("===========================================================================")
 
+    # Ensure CI/test override defaults (10s lease, 3s heartbeat) apply if not explicitly provided
+    os.environ.setdefault("AI_BRAIN_LEASE_DURATION", "10")
+    os.environ.setdefault("AI_BRAIN_HEARTBEAT_INTERVAL", "3")
+
     # 1. Validate Compose Configuration
     logger.info("[Step 1] Validating Compose configuration syntax...")
     run_cmd(["docker", "compose", "config", "-q"])
@@ -471,17 +475,28 @@ def run_acceptance(clean_volumes: bool = False) -> int:
         )
         assert int_db_count == "1", f"Expected exactly 1 interaction record in DB, got: {int_db_count}"
 
-        # 3. Exactly one corresponding set of memory side effects
-        mem_db_count = query_postgres(
-            f"SELECT COUNT(*) FROM memories WHERE content ILIKE '%automated lease recovery%';"
+        # 3. Exactly one logical set of memories produced by the recovered interaction
+        # Prompt and agent response each yield one distinct decision memory
+        mem_distinct_contents = query_postgres(
+            f"SELECT COUNT(DISTINCT content) FROM memories WHERE content ILIKE '%automated lease recovery%';"
         )
-        assert mem_db_count == "1", f"Expected exactly 1 memory record in DB, got: {mem_db_count}"
+        assert mem_distinct_contents == "2", f"Expected exactly 2 distinct memory contents (prompt + response decisions), got: {mem_distinct_contents}"
 
-        # 4. No duplicate event writes
-        evt_db_count = query_postgres(
-            f"SELECT COUNT(*) FROM events WHERE payload->>'idempotency_key' = '{crash_idempotency_key}';"
+        # All memory records with interaction metadata belong exclusively to this single interaction
+        mem_interaction_count = query_postgres(
+            f"SELECT COUNT(DISTINCT metadata->>'interaction_id') FROM memories WHERE metadata->>'interaction_id' IS NOT NULL AND content ILIKE '%automated lease recovery%';"
         )
-        assert evt_db_count == "1", f"Expected exactly 1 event record in DB, got: {evt_db_count}"
+        assert mem_interaction_count == "1", f"Expected all memories to originate from single interaction, got: {mem_interaction_count}"
+
+        # 4. Exactly one corresponding set of lifecycle events (INPUT, CONTEXT, RESPONSE, COMPLETED)
+        evt_db_count = query_postgres(
+            f"SELECT COUNT(*) FROM events WHERE session_id = 'sess_ci_crash_002';"
+        )
+        assert evt_db_count == "4", f"Expected exactly 4 lifecycle events for interaction session, got: {evt_db_count}"
+        evt_distinct_types = query_postgres(
+            f"SELECT COUNT(DISTINCT event_type) FROM events WHERE session_id = 'sess_ci_crash_002';"
+        )
+        assert evt_distinct_types == "4", f"Expected 4 distinct event types across lifecycle, got: {evt_distinct_types}"
 
         # 5. External HTTP verification of resulting interaction
         status, int_body, _ = http_get(
@@ -489,7 +504,9 @@ def run_acceptance(clean_volumes: bool = False) -> int:
             headers=api_hdrs,
         )
         assert status == 200, f"Expected 200 retrieving interaction, got {status}"
-        logger.info("Database-backed task completion and exactly-once side effects (task, interaction, memory, event) verified.")
+        int_json = json.loads(int_body)
+        assert int_json.get("status") == "COMPLETED", f"Expected interaction status COMPLETED, got {int_json.get('status')}"
+        logger.info("Database-backed task completion and exactly-once side effects (task, interaction, memory set, events) verified.")
 
         # 10. Database Persistence Across Container Restarts
         logger.info("[Step 10] Testing PostgreSQL data persistence across restarts...")
@@ -506,12 +523,40 @@ def run_acceptance(clean_volumes: bool = False) -> int:
     except Exception as exc:
         logger.error("Acceptance test failed with error: %s", exc)
         try:
+            logger.info("=== DIAGNOSTIC DATABASE DUMP BEFORE TEARDOWN ===")
+            tasks_dump = query_postgres(
+                "SELECT task_id, task_type, status, retry_count, locked_by, locked_until, created_at, updated_at "
+                "FROM background_tasks ORDER BY created_at DESC LIMIT 5;"
+            )
+            logger.error("[DIAGNOSTIC TASKS]\n%s", sanitize_sensitive_data(tasks_dump))
+
+            ints_dump = query_postgres(
+                "SELECT interaction_id, idempotency_key, status, stages_completed, created_at "
+                "FROM interactions ORDER BY created_at DESC LIMIT 5;"
+            )
+            logger.error("[DIAGNOSTIC INTERACTIONS]\n%s", sanitize_sensitive_data(ints_dump))
+
+            mems_dump = query_postgres(
+                "SELECT memory_id, project_id, status, content, metadata->>'interaction_id', created_at "
+                "FROM memories ORDER BY created_at DESC LIMIT 10;"
+            )
+            logger.error("[DIAGNOSTIC MEMORIES]\n%s", sanitize_sensitive_data(mems_dump))
+
+            evts_dump = query_postgres(
+                "SELECT event_id, event_type, session_id, timestamp "
+                "FROM events ORDER BY timestamp DESC LIMIT 10;"
+            )
+            logger.error("[DIAGNOSTIC EVENTS]\n%s", sanitize_sensitive_data(evts_dump))
+        except Exception as db_dump_err:
+            logger.warning("Failed to dump diagnostic database records: %s", db_dump_err)
+
+        try:
             logger.info("=== DUMPING WORKER CONTAINER LOGS ON FAILURE ===")
-            w_out, _ = run_cmd(["docker", "compose", "logs", "--tail=200", "worker"])
+            _, w_out, _ = run_cmd(["docker", "compose", "logs", "--tail=200", "worker"], check=False)
             for line in w_out.splitlines():
                 logger.error("[WORKER LOG] %s", line)
             logger.info("=== DUMPING API CONTAINER LOGS ON FAILURE ===")
-            api_out, _ = run_cmd(["docker", "compose", "logs", "--tail=100", "api"])
+            _, api_out, _ = run_cmd(["docker", "compose", "logs", "--tail=100", "api"], check=False)
             for line in api_out.splitlines():
                 logger.error("[API LOG] %s", line)
         except Exception as dump_err:

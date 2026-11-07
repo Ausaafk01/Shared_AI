@@ -19,6 +19,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -35,13 +36,37 @@ PROM_BASE = "http://localhost:9090"
 GRAFANA_BASE = "http://localhost:3000"
 
 
+def sanitize_sensitive_data(text: str) -> str:
+    """Sanitize JWT tokens, API keys, credentials, and passwords from log and error messages."""
+    if not text:
+        return ""
+    # Redact standard JWTs
+    text = re.sub(r'eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+', '[REDACTED_JWT]', text)
+    # Redact Bearer authorization headers
+    text = re.sub(r'(Bearer\s+)[A-Za-z0-9_\-\.]+', r'\1[REDACTED_TOKEN]', text, flags=re.IGNORECASE)
+    # Redact API keys matching format
+    text = re.sub(r'agy_[A-Za-z0-9_]{16,}', '[REDACTED_API_KEY]', text)
+    # Redact passwords in connection URLs
+    text = re.sub(r'://([^:]+):([^@]+)@', r'://\1:[REDACTED_PASSWORD]@', text)
+    return text
+
+
 def run_cmd(args: list[str], check: bool = True) -> Tuple[int, str, str]:
-    logger.info("Executing: %s", " ".join(args))
+    sanitized_cmd = " ".join(sanitize_sensitive_data(arg) for arg in args)
+    logger.info("Executing: %s", sanitized_cmd)
     proc = subprocess.run(args, capture_output=True, text=True)
+    clean_stdout = sanitize_sensitive_data(proc.stdout)
+    clean_stderr = sanitize_sensitive_data(proc.stderr)
     if check and proc.returncode != 0:
-        logger.error("Command failed (rc=%d):\nSTDOUT:\n%s\nSTDERR:\n%s", proc.returncode, proc.stdout, proc.stderr)
-        raise RuntimeError(f"Command {' '.join(args)} failed with code {proc.returncode}")
-    return proc.returncode, proc.stdout, proc.stderr
+        logger.error(
+            "Command failed (rc=%d):\n--- STDOUT ---\n%s\n--- STDERR ---\n%s",
+            proc.returncode,
+            clean_stdout.strip() or "(empty)",
+            clean_stderr.strip() or "(empty)",
+        )
+        err_detail = clean_stderr.strip() or clean_stdout.strip() or f"exit code {proc.returncode}"
+        raise RuntimeError(f"Command '{sanitized_cmd}' failed (rc={proc.returncode}): {err_detail}")
+    return proc.returncode, clean_stdout, clean_stderr
 
 
 def http_get(url: str, headers: Optional[Dict[str, str]] = None, timeout: float = 5.0) -> Tuple[int, str, Dict[str, str]]:
@@ -87,19 +112,39 @@ def wait_for_http(url: str, expected_status: int = 200, timeout: float = 60.0, s
 
 def get_container_auth_token() -> str:
     """Generate a valid OWNER JWT token using the deployed API container's configuration."""
-    cmd = [
-        "docker", "compose", "exec", "-T", "api", "python", "-c",
-        (
-            "from ai_brain.auth.tokens import KeyManager, TokenService\n"
-            "from ai_brain.auth.models import ProjectRole\n"
-            "import os\n"
-            "sec = os.environ.get('AI_BRAIN_JWT_SECRET', 'default-change-me-in-production-32b!')\n"
-            "km = KeyManager(active_key_id='k_ci', active_signing_key=sec)\n"
-            "ts = TokenService(key_manager=km)\n"
-            "tok = ts.create_user_token(user_id='ci_user', role=ProjectRole.OWNER, project_ids=['default'], duration_minutes=60)\n"
-            "print(tok)\n"
-        )
-    ]
+    script = (
+        "import sys\n"
+        "from ai_brain.config import load_config_from_env\n"
+        "from ai_brain.server.dependencies import create_container_from_config\n"
+        "from ai_brain.auth import UserRecord, ProjectMemberRecord, ProjectRole, IdentityType\n"
+        "\n"
+        "cfg = load_config_from_env()\n"
+        "container = create_container_from_config(cfg)\n"
+        "try:\n"
+        "    user_id = 'ci_owner_user'\n"
+        "    project_id = 'default'\n"
+        "    user = container.auth_store.get_user(user_id)\n"
+        "    if not user:\n"
+        "        container.auth_store.create_user(UserRecord(user_id=user_id, email='ci_owner@example.com', name='CI Owner'))\n"
+        "    member = container.auth_store.get_project_member(project_id, user_id)\n"
+        "    if not member:\n"
+        "        container.auth_store.add_project_member(\n"
+        "            ProjectMemberRecord(member_id='mem_ci_owner', project_id=project_id, user_id=user_id, role=ProjectRole.OWNER)\n"
+        "        )\n"
+        "    elif member.role != ProjectRole.OWNER:\n"
+        "        container.auth_store.update_project_member_role(project_id, user_id, ProjectRole.OWNER)\n"
+        "    token = container.token_service.create_access_token(\n"
+        "        subject=user_id,\n"
+        "        identity_type=IdentityType.USER,\n"
+        "        name='CI Owner',\n"
+        "        scopes=['*'],\n"
+        "        expires_in_seconds=3600,\n"
+        "    )\n"
+        "    print(token)\n"
+        "finally:\n"
+        "    container.close()\n"
+    )
+    cmd = ["docker", "compose", "exec", "-T", "api", "python", "-c", script]
     _, out, _ = run_cmd(cmd)
     token = out.strip().splitlines()[-1].strip()
     return token

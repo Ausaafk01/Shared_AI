@@ -447,6 +447,76 @@ class TestContainerFactoryAndConfiguration(unittest.TestCase):
         finally:
             container.close()
 
+    def test_production_container_auth_token_generation_and_rbac(self) -> None:
+        """Verify token generation using production container configuration and auth imports."""
+        from ai_brain.config import load_config_from_env
+        from ai_brain.auth import (
+            IdentityType,
+            KeyManager,
+            Permission,
+            PermissionDeniedError,
+            ProjectMemberRecord,
+            ProjectRole,
+            TokenService,
+            UserRecord,
+        )
+
+        cfg = load_config_from_env()
+        container = create_container_from_config(cfg)
+        try:
+            user_id = f"test_owner_{uuid.uuid4().hex[:8]}"
+            project_id = "default"
+
+            # 1. Ensure user exists in auth_store
+            user = container.auth_store.get_user(user_id)
+            if not user:
+                container.auth_store.create_user(
+                    UserRecord(user_id=user_id, email=f"{user_id}@example.com", name="CI Owner")
+                )
+
+            # 2. Ensure project membership with OWNER role
+            member = container.auth_store.get_project_member(project_id, user_id)
+            if not member:
+                container.auth_store.add_project_member(
+                    ProjectMemberRecord(
+                        member_id=f"mem_{uuid.uuid4().hex[:8]}",
+                        project_id=project_id,
+                        user_id=user_id,
+                        role=ProjectRole.OWNER,
+                    )
+                )
+            elif member.role != ProjectRole.OWNER:
+                container.auth_store.update_project_member_role(project_id, user_id, ProjectRole.OWNER)
+
+            # 3. Generate token using container TokenService
+            token = container.token_service.create_access_token(
+                subject=user_id,
+                identity_type=IdentityType.USER,
+                name="CI Owner",
+                scopes=["*"],
+                expires_in_seconds=3600,
+            )
+            self.assertIsInstance(token, str)
+            self.assertTrue(len(token.split(".")) == 3, "JWT must contain three segments")
+
+            # 4. Authenticate token
+            ident = container.auth_service.authenticate_token(token)
+            self.assertEqual(ident.identity_id, user_id)
+            self.assertEqual(ident.identity_type, IdentityType.USER)
+            self.assertTrue(ident.is_authenticated)
+
+            # 5. Authorize permissions for default project
+            role = container.rbac_service.get_user_role(project_id, user_id)
+            self.assertEqual(role, ProjectRole.OWNER)
+            container.rbac_service.authorize(ident, project_id, Permission.INTERACTION_EXECUTE)
+            container.rbac_service.authorize(ident, project_id, Permission.INTERACTION_READ)
+
+            # 6. Negative authorization for unassigned foreign project
+            with self.assertRaises(PermissionDeniedError):
+                container.rbac_service.authorize(ident, "non_existent_project", Permission.INTERACTION_EXECUTE)
+        finally:
+            container.close()
+
 
 class TestDockerRuntimeExecution(unittest.TestCase):
     """Runtime tests executed if Docker CLI and daemon are installed on the host."""

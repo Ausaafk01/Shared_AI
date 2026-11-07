@@ -58,10 +58,14 @@ async def submit_task(
         )
 
     try:
+        task_data = dict(payload.payload)
+        if payload.idempotency_key and "idempotency_key" not in task_data:
+            task_data["idempotency_key"] = payload.idempotency_key
+
         task = container.task_store.submit_task(
             project_id=project_id,
             task_type=payload.task_type,
-            payload=payload.payload,
+            payload=task_data,
             idempotency_key=payload.idempotency_key,
         )
         return TaskSubmitResponse(

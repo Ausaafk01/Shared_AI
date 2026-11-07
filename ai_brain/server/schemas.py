@@ -325,9 +325,9 @@ class TaskSubmitRequest(BaseModel):
     """Request payload for submitting an asynchronous background task."""
     model_config = ConfigDict(extra="forbid")
 
-    task_type: str = Field(..., description="Registered task type (e.g. interaction_execution, memory_maintenance)")
+    task_type: str = Field(..., min_length=1, max_length=100, description="Registered task type (e.g. interaction_execution, memory_maintenance)")
     payload: Dict[str, Any] = Field(default_factory=dict, description="Task payload dictionary")
-    idempotency_key: Optional[str] = Field(default=None, max_length=128, description="Client idempotency key")
+    idempotency_key: Optional[str] = Field(default=None, min_length=1, max_length=128, description="Client idempotency key")
 
 
 class TaskSubmitResponse(BaseModel):

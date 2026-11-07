@@ -85,6 +85,11 @@ def handle_interaction_execution(task: TaskRecord, context: Any = None) -> Dict[
         )
         prep_result = context.brain_loop.prepare_context(agent_input)
 
+        # Allow controlled pause for active crash-recovery testing
+        sleep_sec = payload.get("sleep_seconds")
+        if sleep_sec and isinstance(sleep_sec, (int, float)) and sleep_sec > 0:
+            time.sleep(min(float(sleep_sec), 30.0))
+
         # 2. Select agent and generate response
         if "research" in agent_id.lower():
             agent = ResearchAgent(agent_id=agent_id)

@@ -7,13 +7,15 @@ Executes comprehensive runtime acceptance verification on a Docker-capable syste
 4. Verifies external HTTP probes (/healthz, /readyz, /metrics).
 5. Verifies Prometheus target scraping and Grafana dashboard provisioning.
 6. Submits live background task via API, confirms worker execution and interaction storage.
-7. Simulates worker crash mid-processing and verifies lease reclamation and completion.
-8. Verifies PostgreSQL container restart and data persistence.
-9. Performs graceful shutdown.
+7. Simulates worker crash during active task processing and verifies lease recovery and completion.
+8. Verifies database-backed exact-once side effects after crash recovery.
+9. Verifies PostgreSQL container restart and data persistence.
+10. Performs graceful shutdown (default: non-destructive down; --clean-volumes is opt-in).
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import os
@@ -103,13 +105,23 @@ def get_container_auth_token() -> str:
     return token
 
 
-def main() -> int:
+def query_postgres(sql: str) -> str:
+    """Execute SQL query directly against the PostgreSQL container."""
+    cmd = [
+        "docker", "compose", "exec", "-T", "postgres",
+        "psql", "-U", "ai_brain_user", "-d", "ai_brain", "-t", "-A", "-c", sql,
+    ]
+    _, out, _ = run_cmd(cmd)
+    return out.strip()
+
+
+def run_acceptance(clean_volumes: bool = False) -> int:
     if not shutil.which("docker"):
         logger.error("FATAL: 'docker' executable not found in PATH.")
         return 1
 
     logger.info("===========================================================================")
-    logger.info("AI Brain Docker Runtime Acceptance Test")
+    logger.info("AI Brain Docker Runtime Acceptance Test (clean_volumes=%s)", clean_volumes)
     logger.info("===========================================================================")
 
     # 1. Validate Compose Configuration
@@ -219,16 +231,20 @@ def main() -> int:
         assert status_dup == 409, f"Expected 409 for duplicate task, got {status_dup}"
         logger.info("Idempotency protection verified: duplicate task submission rejected with 409.")
 
-        # 9. Worker Crash Recovery Test
-        logger.info("[Step 9] Executing worker crash-recovery test...")
+        # 9. Worker Crash Recovery During Active Execution
+        logger.info("[Step 9] Executing worker crash-recovery during active task execution...")
+        crash_idempotency_key = f"ci_crash_recovery_{int(time.time())}"
+        crash_interaction_id = f"int_crash_{int(time.time())}"
         crash_payload = {
             "task_type": "interaction_execution",
             "payload": {
-                "input_text": "Task for crash recovery verification.",
+                "input_text": "Task for active execution crash recovery verification.",
                 "session_id": "sess_ci_crash_002",
                 "agent_id": "agent-coder",
+                "interaction_id": crash_interaction_id,
+                "sleep_seconds": 3.0,  # Ensure worker is actively executing during termination
             },
-            "idempotency_key": "ci_crash_recovery_002",
+            "idempotency_key": crash_idempotency_key,
         }
 
         status, crash_res, _ = http_post_json(
@@ -236,18 +252,42 @@ def main() -> int:
             data=crash_payload,
             headers=api_hdrs,
         )
-        assert status == 202
+        assert status == 202, f"Failed to submit crash recovery task: {crash_res}"
         crash_task_id = json.loads(crash_res)["task_id"]
+        logger.info("Crash recovery task submitted: %s", crash_task_id)
 
-        # Kill worker abruptly
-        logger.info("Killing worker container mid-processing...")
+        # Poll until worker claims task and enters PROCESSING state
+        logger.info("Waiting for worker to claim task and enter PROCESSING state...")
+        claimed_and_processing = False
+        start_claim = time.time()
+        while time.time() - start_claim < 15.0:
+            status, get_res, _ = http_get(f"{API_BASE}/api/v1/projects/default/tasks/{crash_task_id}", headers=api_hdrs)
+            if status == 200:
+                polled_state = json.loads(get_res)
+                if polled_state["status"] == "PROCESSING":
+                    claimed_and_processing = True
+                    logger.info("Confirmed task '%s' is actively PROCESSING. Abruptly killing worker container mid-flight...", crash_task_id)
+                    break
+            time.sleep(0.05)
+
+        assert claimed_and_processing, f"Task '{crash_task_id}' was not claimed into PROCESSING within 15s"
+
+        # Kill worker container abruptly while actively executing task
         run_cmd(["docker", "compose", "kill", "worker"])
+        logger.info("Worker container terminated during active task execution.")
 
-        # Re-start worker container
+        # Verify task is currently locked in PostgreSQL
+        db_status = query_postgres(
+            f"SELECT status FROM background_tasks WHERE task_id = '{crash_task_id}';"
+        )
+        assert db_status == "PROCESSING", f"Expected PROCESSING in DB, got: {db_status}"
+        logger.info("Database confirms task '%s' was abandoned in PROCESSING state by dead worker.", crash_task_id)
+
+        # Re-start replacement worker container
         logger.info("Restarting replacement worker container...")
         run_cmd(["docker", "compose", "up", "-d", "worker"])
 
-        # Wait for task completion by replacement worker
+        # Wait for replacement worker to reclaim task and complete it
         start_wait = time.time()
         recovered = False
         while time.time() - start_wait < 45.0:
@@ -260,14 +300,33 @@ def main() -> int:
             time.sleep(1.0)
 
         assert recovered, "Replacement worker failed to recover and complete crash-recovery task"
-        logger.info("Worker crash recovery confirmed: task completed without duplicate writes.")
+        logger.info("Replacement worker claimed abandoned task and successfully completed it.")
+
+        # Database-backed verification of exactly-once side effects
+        task_db_count = query_postgres(
+            f"SELECT COUNT(*) FROM background_tasks WHERE task_id = '{crash_task_id}' AND status = 'COMPLETED';"
+        )
+        assert task_db_count == "1", f"Expected exactly 1 completed task in DB, got: {task_db_count}"
+
+        int_db_count = query_postgres(
+            f"SELECT COUNT(*) FROM interactions WHERE idempotency_key = '{crash_idempotency_key}';"
+        )
+        assert int_db_count == "1", f"Expected exactly 1 interaction record in DB, got: {int_db_count}"
+
+        # External HTTP verification of resulting interaction
+        status, int_body, _ = http_get(
+            f"{API_BASE}/api/v1/projects/default/interactions/{crash_interaction_id}",
+            headers=api_hdrs,
+        )
+        assert status == 200, f"Expected 200 retrieving interaction, got {status}"
+        logger.info("Database-backed task completion and exactly-once interaction verified.")
 
         # 10. Database Persistence Across Container Restarts
         logger.info("[Step 10] Testing PostgreSQL data persistence across restarts...")
         run_cmd(["docker", "compose", "restart", "postgres"])
         wait_for_http(f"{API_BASE}/readyz", expected_status=200, timeout=45.0)
 
-        # Confirm previously completed task is still readable and intact
+        # Confirm previously completed tasks are still readable and intact
         status, persisted_res, _ = http_get(f"{API_BASE}/api/v1/projects/default/tasks/{task_id}", headers=api_hdrs)
         assert status == 200
         persisted_json = json.loads(persisted_res)
@@ -275,15 +334,30 @@ def main() -> int:
         logger.info("PostgreSQL persistence verified across container restarts.")
 
     finally:
-        # 11. Graceful Shutdown
-        logger.info("[Step 11] Performing graceful shutdown...")
-        run_cmd(["docker", "compose", "down", "-v"])
-        logger.info("Docker Compose deployment cleanly terminated.")
+        # 11. Graceful Shutdown (Default: Non-destructive 'docker compose down'; -v requires opt-in)
+        logger.info("[Step 11] Performing graceful shutdown (clean_volumes=%s)...", clean_volumes)
+        down_cmd = ["docker", "compose", "down"]
+        if clean_volumes:
+            down_cmd.append("-v")
+        run_cmd(down_cmd)
+        logger.info("Docker Compose deployment cleanly stopped.")
 
     logger.info("===========================================================================")
     logger.info("ALL DOCKER RUNTIME ACCEPTANCE TESTS PASSED SUCCESSFULLY!")
     logger.info("===========================================================================")
     return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="AI Brain Docker Runtime Acceptance Test Harness")
+    parser.add_argument(
+        "--clean-volumes",
+        action="store_true",
+        default=False,
+        help="Explicitly destroy persistent Docker volumes on shutdown (disabled by default for safety).",
+    )
+    args = parser.parse_args()
+    return run_acceptance(clean_volumes=args.clean_volumes)
 
 
 if __name__ == "__main__":

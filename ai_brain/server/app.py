@@ -52,6 +52,7 @@ from ai_brain.server.routers import (
     memories,
     retrieval,
     sessions,
+    tasks,
     workflows,
 )
 from ai_brain.server.schemas import (
@@ -178,6 +179,7 @@ def create_app(
     app.include_router(memories.router)
     app.include_router(retrieval.router)
     app.include_router(sessions.router)
+    app.include_router(tasks.router)
     app.include_router(workflows.router)
 
     # 4. System Health Endpoints

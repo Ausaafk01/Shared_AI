@@ -316,3 +316,40 @@ class WorkflowRecordDTO(BaseModel):
     completed_step_count: int
     created_at: str
     updated_at: str
+
+
+# =============================================================================
+# Background Task Schemas (M5.7)
+# =============================================================================
+class TaskSubmitRequest(BaseModel):
+    """Request payload for submitting an asynchronous background task."""
+    model_config = ConfigDict(extra="forbid")
+
+    task_type: str = Field(..., description="Registered task type (e.g. interaction_execution, memory_maintenance)")
+    payload: Dict[str, Any] = Field(default_factory=dict, description="Task payload dictionary")
+    idempotency_key: Optional[str] = Field(default=None, max_length=128, description="Client idempotency key")
+
+
+class TaskSubmitResponse(BaseModel):
+    """Response returned upon submitting a background task."""
+    task_id: str
+    project_id: str
+    task_type: str
+    status: str
+    idempotency_key: Optional[str] = None
+    created_at: str
+
+
+class TaskStatusResponse(BaseModel):
+    """Response payload representing the state and result of a background task."""
+    task_id: str
+    project_id: str
+    task_type: str
+    status: str
+    retry_count: int
+    idempotency_key: Optional[str] = None
+    result_data: Optional[Dict[str, Any]] = None
+    error_message: Optional[str] = None
+    created_at: str
+    updated_at: str
+

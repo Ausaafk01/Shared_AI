@@ -177,6 +177,19 @@ class TestDockerAndComposeManifests(unittest.TestCase):
         self.assertTrue(any("ai_brain_http_requests_total" in expr for expr in expressions))
         self.assertTrue(any("ai_brain_task_queue_depth" in expr for expr in expressions))
 
+    def test_ci_workflow_manifest_structure(self) -> None:
+        """Verify .github/workflows/docker-deployment.yml defines automated CI acceptance pipeline."""
+        wf_path = os.path.join(self.project_root, ".github", "workflows", "docker-deployment.yml")
+        self.assertTrue(os.path.isfile(wf_path), "CI workflow file must exist")
+
+        with open(wf_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn("ubuntu-latest", content)
+        self.assertIn("docker compose config", content)
+        self.assertIn("verify_docker_runtime_acceptance.py", content)
+        self.assertIn("unittest discover", content)
+
     def test_env_example_safety(self) -> None:
         """Verify .env.example contains only placeholders and no real secrets."""
         env_ex_path = os.path.join(self.project_root, ".env.example")

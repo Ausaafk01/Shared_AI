@@ -229,6 +229,7 @@ class TestSystemProbesAndOpenAPI(BaseAPITestCase):
         self.assertIn("/api/v1/projects/{project_id}/memories", paths)
         self.assertIn("/api/v1/projects/{project_id}/retrieval/query", paths)
         self.assertIn("/api/v1/projects/{project_id}/sessions", paths)
+        self.assertIn("/api/v1/projects/{project_id}/tasks", paths)
         self.assertIn("/api/v1/projects/{project_id}/workflows", paths)
 
     def test_interactive_documentation_ui(self) -> None:
@@ -663,6 +664,60 @@ class TestSessionsAndWorkflows(BaseAPITestCase):
         self.assertEqual(exec_data["status"], "COMPLETED")
         self.assertEqual(len(exec_data["completed_steps"]), 3)
         self.assertIsNotNone(exec_data["final_output"])
+
+    def test_background_task_api_lifecycle(self) -> None:
+        """Verify submitting and polling background tasks via REST API endpoints."""
+        task_payload = {
+            "task_type": "memory_maintenance",
+            "payload": {"action": "prune_outdated"},
+            "idempotency_key": f"idem_task_{uuid.uuid4().hex[:8]}",
+        }
+
+        # 1. Authorization rejection: unauthenticated
+        res_unauth = self.client.post(
+            f"/api/v1/projects/{self.project_a}/tasks",
+            json=task_payload,
+        )
+        self.assertEqual(res_unauth.status_code, 401)
+
+        # 2. Authorization rejection: READ_ONLY lacks INTERACTION_EXECUTE
+        res_ro = self.client.post(
+            f"/api/v1/projects/{self.project_a}/tasks",
+            headers={"Authorization": f"Bearer {self.readonly_token}"},
+            json=task_payload,
+        )
+        self.assertEqual(res_ro.status_code, 403)
+
+        # 3. Successful submission with OWNER token
+        res_submit = self.client.post(
+            f"/api/v1/projects/{self.project_a}/tasks",
+            headers={"Authorization": f"Bearer {self.owner_token}"},
+            json=task_payload,
+        )
+        self.assertEqual(res_submit.status_code, 202)
+        submit_data = res_submit.json()
+        task_id = submit_data["task_id"]
+        self.assertEqual(submit_data["status"], "PENDING")
+        self.assertEqual(submit_data["task_type"], "memory_maintenance")
+
+        # 4. Duplicate submission with same idempotency key returns 409 Conflict
+        res_dup = self.client.post(
+            f"/api/v1/projects/{self.project_a}/tasks",
+            headers={"Authorization": f"Bearer {self.owner_token}"},
+            json=task_payload,
+        )
+        self.assertEqual(res_dup.status_code, 409)
+
+        # 5. Retrieve task status
+        res_get = self.client.get(
+            f"/api/v1/projects/{self.project_a}/tasks/{task_id}",
+            headers={"Authorization": f"Bearer {self.owner_token}"},
+        )
+        self.assertEqual(res_get.status_code, 200)
+        task_data = res_get.json()
+        self.assertEqual(task_data["task_id"], task_id)
+        self.assertEqual(task_data["project_id"], self.project_a)
+        self.assertEqual(task_data["status"], "PENDING")
 
 
 class TestHttpRateLimiting(unittest.TestCase):

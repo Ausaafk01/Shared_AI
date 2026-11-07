@@ -55,9 +55,9 @@ def run_cmd(args: list[str], check: bool = True) -> Tuple[int, str, str]:
     sanitized_cmd = " ".join(sanitize_sensitive_data(arg) for arg in args)
     logger.info("Executing: %s", sanitized_cmd)
     proc = subprocess.run(args, capture_output=True, text=True)
-    clean_stdout = sanitize_sensitive_data(proc.stdout)
-    clean_stderr = sanitize_sensitive_data(proc.stderr)
     if check and proc.returncode != 0:
+        clean_stdout = sanitize_sensitive_data(proc.stdout)
+        clean_stderr = sanitize_sensitive_data(proc.stderr)
         logger.error(
             "Command failed (rc=%d):\n--- STDOUT ---\n%s\n--- STDERR ---\n%s",
             proc.returncode,
@@ -66,7 +66,57 @@ def run_cmd(args: list[str], check: bool = True) -> Tuple[int, str, str]:
         )
         err_detail = clean_stderr.strip() or clean_stdout.strip() or f"exit code {proc.returncode}"
         raise RuntimeError(f"Command '{sanitized_cmd}' failed (rc={proc.returncode}): {err_detail}")
-    return proc.returncode, clean_stdout, clean_stderr
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def validate_token_structure(token: Any) -> str:
+    """Validate that token is a valid, raw, 3-segment JWT string without logging sensitive claims."""
+    if not isinstance(token, str):
+        logger.error("Token validation failed: type is %s (expected str)", type(token).__name__)
+        raise ValueError(f"Token must be str, got {type(token).__name__}")
+
+    cleaned = token.strip()
+    if not cleaned:
+        logger.error("Token validation failed: token string is empty")
+        raise ValueError("Token string is empty")
+
+    # Reject quotes, JSON, tuple, dict, or object representations
+    if cleaned.startswith(("{", "[", "(", "<", "'", '"')):
+        logger.error("Token validation failed: token appears to be a wrapped object/representation")
+        raise ValueError("Token must not be wrapped in quotes, JSON, or object representation")
+
+    segments = cleaned.split(".")
+    segment_count = len(segments)
+    token_len = len(cleaned)
+    logger.info(
+        "Token extraction check: type=%s, length=%d, segments=%d, extraction_succeeded=True",
+        type(cleaned).__name__,
+        token_len,
+        segment_count,
+    )
+
+    if segment_count != 3 or not all(segments):
+        logger.error("Token validation failed: expected exactly 3 non-empty segments, got %d", segment_count)
+        raise ValueError(f"Malformed JWT: expected 3 non-empty dot-separated segments, got {segment_count}")
+
+    return cleaned
+
+
+def build_auth_header(token: str) -> Dict[str, str]:
+    """Construct verified HTTP Authorization header without sensitive logging."""
+    raw_token = validate_token_structure(token)
+    if raw_token.lower().startswith("bearer "):
+        raw_token = raw_token[7:].strip()
+        raw_token = validate_token_structure(raw_token)
+
+    auth_header_value = f"Bearer {raw_token}"
+    starts_with_bearer = auth_header_value.startswith("Bearer ")
+    logger.info(
+        "Auth header verified: starts_with_bearer=%s, token_length=%d",
+        starts_with_bearer,
+        len(raw_token),
+    )
+    return {"Authorization": auth_header_value}
 
 
 def http_get(url: str, headers: Optional[Dict[str, str]] = None, timeout: float = 5.0) -> Tuple[int, str, Dict[str, str]]:
@@ -140,14 +190,20 @@ def get_container_auth_token() -> str:
         "        scopes=['*'],\n"
         "        expires_in_seconds=3600,\n"
         "    )\n"
-        "    print(token)\n"
+        "    print('__TOKEN_START__' + str(token) + '__TOKEN_END__')\n"
         "finally:\n"
         "    container.close()\n"
     )
     cmd = ["docker", "compose", "exec", "-T", "api", "python", "-c", script]
     _, out, _ = run_cmd(cmd)
-    token = out.strip().splitlines()[-1].strip()
-    return token
+
+    match = re.search(r'__TOKEN_START__([A-Za-z0-9_\-\.]+)__TOKEN_END__', out)
+    if not match:
+        candidate = out.strip().splitlines()[-1].strip() if out.strip() else ""
+    else:
+        candidate = match.group(1).strip()
+
+    return validate_token_structure(candidate)
 
 
 def query_postgres(sql: str) -> str:
@@ -226,10 +282,28 @@ def run_acceptance(clean_volumes: bool = False) -> int:
         assert "AI Brain Production Overview" in dash_body
         logger.info("Grafana dashboard provisioned and loaded successfully.")
 
-        # 8. Live Background Task Submission & Worker Execution
-        logger.info("[Step 8] Executing live background task test...")
+        # 8. Authentication Pre-Flight & Live Background Task Submission
+        logger.info("[Step 8] Generating and verifying CI identity authorization...")
         auth_token = get_container_auth_token()
-        api_hdrs = {"Authorization": f"Bearer {auth_token}"}
+        api_hdrs = build_auth_header(auth_token)
+
+        # 8a. Verify unauthenticated request is rejected (401)
+        status_unauth, _, _ = http_get(f"{API_BASE}/api/v1/projects/default/memories")
+        assert status_unauth == 401, f"Expected 401 for unauthenticated request, got {status_unauth}"
+        logger.info("Pre-flight check passed: unauthenticated request rejected with 401.")
+
+        # 8b. Verify CI identity authenticates successfully with OWNER role on project 'default' (200)
+        status_auth, mem_res, _ = http_get(f"{API_BASE}/api/v1/projects/default/memories", headers=api_hdrs)
+        assert status_auth == 200, f"Expected 200 for authenticated OWNER request on 'default', got {status_auth}: {mem_res}"
+        logger.info("Pre-flight check passed: CI identity authenticated successfully with OWNER role on project 'default'.")
+
+        # 8c. Verify cross-project access to unauthorized project is rejected (403)
+        status_cross, _, _ = http_get(f"{API_BASE}/api/v1/projects/unauthorized_foreign_project_ci/memories", headers=api_hdrs)
+        assert status_cross == 403, f"Expected 403 for unauthorized foreign project access, got {status_cross}"
+        logger.info("Pre-flight check passed: cross-project access rejected with 403.")
+
+        # 8d. Live Background Task Submission & Worker Execution
+        logger.info("Submitting live background task via authenticated API...")
 
         task_payload = {
             "task_type": "interaction_execution",

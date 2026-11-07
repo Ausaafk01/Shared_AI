@@ -517,6 +517,52 @@ class TestContainerFactoryAndConfiguration(unittest.TestCase):
         finally:
             container.close()
 
+    def test_harness_token_validation_and_header_construction(self) -> None:
+        """Verify structural token validation, exact header construction, and rejection of malformed tokens."""
+        from scripts.verify_docker_runtime_acceptance import (
+            build_auth_header,
+            validate_token_structure,
+        )
+
+        valid_sample = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2FtcGxlX3NpZ25hdHVyZQ"
+
+        # 1. Valid token passes validation
+        cleaned = validate_token_structure(valid_sample)
+        self.assertEqual(cleaned, valid_sample)
+
+        # 2. Header construction format
+        headers = build_auth_header(valid_sample)
+        self.assertIn("Authorization", headers)
+        self.assertEqual(headers["Authorization"], f"Bearer {valid_sample}")
+        self.assertTrue(headers["Authorization"].startswith("Bearer "))
+        self.assertFalse(headers["Authorization"].startswith("Bearer Bearer "))
+
+        # 3. Idempotent with existing Bearer prefix
+        headers_prefixed = build_auth_header(f"Bearer {valid_sample}")
+        self.assertEqual(headers_prefixed["Authorization"], f"Bearer {valid_sample}")
+
+        # 4. Rejections: empty, non-string, missing segments, and wrapper representations
+        with self.assertRaises(ValueError):
+            validate_token_structure("")
+
+        with self.assertRaises(ValueError):
+            validate_token_structure(12345)
+
+        with self.assertRaises(ValueError):
+            validate_token_structure("only_one_segment")
+
+        with self.assertRaises(ValueError):
+            validate_token_structure("two.segments")
+
+        with self.assertRaises(ValueError):
+            validate_token_structure("[REDACTED_JWT]")
+
+        with self.assertRaises(ValueError):
+            validate_token_structure(f"'{valid_sample}'")
+
+        with self.assertRaises(ValueError):
+            validate_token_structure('{"token": "xyz"}')
+
 
 class TestDockerRuntimeExecution(unittest.TestCase):
     """Runtime tests executed if Docker CLI and daemon are installed on the host."""

@@ -66,6 +66,7 @@ from ai_brain.tasks.store import (
     create_task_store,
 )
 from ai_brain.tasks.worker import BackgroundWorker
+from ai_brain.server.dependencies import create_sqlite_container, create_postgres_container
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("tests.test_background_tasks")
@@ -1062,6 +1063,296 @@ class TestFifteenCoreMilestoneRequirements(unittest.TestCase):
         fleet.stop(timeout=2.0)
         self.assertFalse(fleet.is_running)
         self.assertEqual(fleet.current_concurrency, 0)
+
+
+class TestInteractionExecutionEndToEnd(unittest.TestCase):
+    """
+    Dedicated tests verifying full interaction_execution end-to-end:
+    1. Task submitted to queue.
+    2. Worker claims task and invokes handler.
+    3. Handler calls BrainLoop context preparation.
+    4. Registered agent executes interaction.
+    5. BrainLoop completion runs successfully.
+    6. Interaction output and extracted memories persisted exactly once.
+    7. Task acknowledged as COMPLETED.
+    8. Duplicate submission/retry cannot duplicate interaction or memory writes.
+    9. Failure during execution follows configured retry policy.
+    10. Tenant isolation maintained throughout operation.
+    """
+
+    def setUp(self) -> None:
+        self.project_id = f"proj_int_e2e_{uuid.uuid4().hex[:8]}"
+        self.container = create_sqlite_container(":memory:")
+
+    def tearDown(self) -> None:
+        self.container.close()
+
+    def test_01_interaction_execution_full_lifecycle(self) -> None:
+        """Verifies requirements 1-7: full lifecycle, agent execution, and exact persistence."""
+        task_store = self.container.task_store
+        task_registry = self.container.task_registry
+        self.assertIsNotNone(task_store)
+        self.assertIsNotNone(task_registry)
+
+        # 1. Persisted interaction execution task submitted to queue
+        task = task_store.submit_task(
+            project_id=self.project_id,
+            task_type="interaction_execution",
+            payload={
+                "input_text": "We decided to adopt Redis for session caching and token storage.",
+                "agent_id": "agent-coder",
+                "session_id": f"sess_{uuid.uuid4().hex[:8]}",
+            },
+        )
+        self.assertIsNotNone(task.task_id)
+        self.assertEqual(task.status, TaskStatus.PENDING)
+
+        # 2. Worker claims task and invokes handler
+        worker = BackgroundWorker(
+            store=task_store,
+            project_id=self.project_id,
+            registry=task_registry,
+            context=self.container,
+            worker_id="w_int_e2e_1",
+            poll_interval=0.05,
+        )
+        worker.start()
+
+        # Wait for task completion
+        time.sleep(0.6)
+        worker.stop(timeout=2.0)
+
+        # 7. Task acknowledged as COMPLETED
+        finished_task = task_store.get_task(self.project_id, task.task_id)
+        self.assertIsNotNone(finished_task)
+        self.assertEqual(finished_task.status, TaskStatus.COMPLETED)
+        self.assertIsNone(finished_task.locked_by)
+
+        # 3. BrainLoop context preparation ran
+        task_result = finished_task.payload.get("result", {})
+        self.assertEqual(task_result.get("status"), "COMPLETED")
+        interaction_id = task_result.get("interaction_id")
+        self.assertIsNotNone(interaction_id)
+
+        # 4 & 5. Registered agent executed and BrainLoop completion ran successfully
+        int_rec = self.container.interaction_store.get(interaction_id)
+        self.assertIsNotNone(int_rec)
+        self.assertEqual(int_rec.status.value, "COMPLETED")
+        self.assertIsNotNone(int_rec.context_result)
+        self.assertIsNotNone(int_rec.response)
+        self.assertIn("Redis", int_rec.response.content)
+
+        # 6. Interaction output and extracted memories persisted exactly once
+        mem_count = self.container.memory_store.count(project_id=self.project_id)
+        self.assertGreaterEqual(mem_count, 1)
+        self.assertEqual(task_result.get("memories_created"), mem_count)
+
+    def test_02_interaction_execution_idempotency_prevents_duplicate_writes(self) -> None:
+        """Verifies requirement 8: retry or duplicate submission cannot duplicate interaction or memory writes."""
+        task_store = self.container.task_store
+        task_registry = self.container.task_registry
+        idem_key = f"e2e_idem_{uuid.uuid4().hex[:8]}"
+
+        # Submit task with idempotency key
+        task = task_store.submit_task(
+            project_id=self.project_id,
+            task_type="interaction_execution",
+            payload={
+                "input_text": "Architectural decision: Use PostgreSQL for primary ACID storage.",
+                "agent_id": "agent-coder",
+                "idempotency_key": idem_key,
+            },
+            idempotency_key=idem_key,
+        )
+
+        worker = BackgroundWorker(
+            store=task_store,
+            project_id=self.project_id,
+            registry=task_registry,
+            context=self.container,
+            worker_id="w_int_idem",
+            poll_interval=0.05,
+        )
+        worker.start()
+        time.sleep(0.6)
+        worker.stop(timeout=2.0)
+
+        # Initial memory count after completion
+        initial_mem_count = self.container.memory_store.count(project_id=self.project_id)
+        self.assertGreaterEqual(initial_mem_count, 1)
+
+        # Attempt 1: Duplicate submission to task store is rejected
+        with self.assertRaises(DuplicateTaskError):
+            task_store.submit_task(
+                project_id=self.project_id,
+                task_type="interaction_execution",
+                payload={
+                    "input_text": "Architectural decision: Use PostgreSQL for primary ACID storage.",
+                    "agent_id": "agent-coder",
+                    "idempotency_key": idem_key,
+                },
+                idempotency_key=idem_key,
+            )
+
+        # Attempt 2: Re-executing the handler on the same task record returns cached result
+        res = task_registry.execute(task, self.container)
+        self.assertTrue(res.success)
+        self.assertTrue(res.output.get("already_completed", False))
+
+        # Memory store count remains unchanged (exactly once, zero duplicates)
+        final_mem_count = self.container.memory_store.count(project_id=self.project_id)
+        self.assertEqual(final_mem_count, initial_mem_count)
+
+    def test_03_interaction_execution_failure_follows_retry_policy(self) -> None:
+        """Verifies requirement 9: failure during execution follows configured retry policy."""
+        task_store = self.container.task_store
+        task_registry = self.container.task_registry
+
+        attempts = 0
+        original_prepare = self.container.brain_loop.prepare_context
+
+        def flaky_prepare(agent_input: Any) -> Any:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise RuntimeError("Simulated transient connection timeout during context retrieval")
+            return original_prepare(agent_input)
+
+        self.container.brain_loop.prepare_context = flaky_prepare
+
+        task = task_store.submit_task(
+            project_id=self.project_id,
+            task_type="interaction_execution",
+            payload={"input_text": "Configure database connection pooling settings."},
+            max_retries=3,
+        )
+
+        worker = BackgroundWorker(
+            store=task_store,
+            project_id=self.project_id,
+            registry=task_registry,
+            context=self.container,
+            worker_id="w_int_retry",
+            poll_interval=0.05,
+            retry_policy=RetryPolicy(base_delay=0.1, max_delay=0.3, backoff_factor=1.5),
+        )
+        worker.start()
+
+        # Wait for retry to take place and succeed
+        time.sleep(0.8)
+        worker.stop(timeout=2.0)
+
+        # Worker retried and succeeded on attempt 2
+        finished = task_store.get_task(self.project_id, task.task_id)
+        self.assertIsNotNone(finished)
+        self.assertEqual(finished.status, TaskStatus.COMPLETED)
+        self.assertEqual(attempts, 2)
+        self.assertEqual(finished.retry_count, 1)
+
+    def test_04_interaction_execution_tenant_isolation(self) -> None:
+        """Verifies requirement 10: tenant isolation is maintained throughout the operation."""
+        proj_a = f"proj_int_a_{uuid.uuid4().hex[:8]}"
+        proj_b = f"proj_int_b_{uuid.uuid4().hex[:8]}"
+
+        task_store = self.container.task_store
+        task_registry = self.container.task_registry
+
+        # Submit task for project A
+        task_a = task_store.submit_task(
+            project_id=proj_a,
+            task_type="interaction_execution",
+            payload={"input_text": "Confidential decision for Project A: Use AES-256-GCM encryption."},
+        )
+
+        # Worker scoped to project B cannot claim or execute project A task
+        worker_b = BackgroundWorker(
+            store=task_store,
+            project_id=proj_b,
+            registry=task_registry,
+            context=self.container,
+            worker_id="w_scoped_b",
+            poll_interval=0.05,
+        )
+        c_b = task_store.claim_next_task(proj_b, "w_scoped_b", 5.0)
+        self.assertIsNone(c_b)
+
+        # Worker scoped to project A claims and executes it
+        worker_a = BackgroundWorker(
+            store=task_store,
+            project_id=proj_a,
+            registry=task_registry,
+            context=self.container,
+            worker_id="w_scoped_a",
+            poll_interval=0.05,
+        )
+        worker_a.start()
+        time.sleep(0.6)
+        worker_a.stop(timeout=2.0)
+
+        # Verify task completed in project A
+        done_a = task_store.get_task(proj_a, task_a.task_id)
+        self.assertEqual(done_a.status, TaskStatus.COMPLETED)
+
+        # Verify memories created in project A are strictly isolated from project B
+        self.assertGreaterEqual(self.container.memory_store.count(project_id=proj_a), 1)
+        self.assertEqual(self.container.memory_store.count(project_id=proj_b), 0)
+
+    @unittest.skipUnless(_IS_PG_LIVE, f"Live PostgreSQL required: {_PG_MSG}")
+    def test_05_interaction_execution_live_postgres(self) -> None:
+        """Verifies full end-to-end interaction_execution on live PostgreSQL."""
+        cfg = DatabaseConfig(
+            backend=StorageBackend.POSTGRES,
+            database_url=ADMIN_PG_URL,
+            pool_size=5,
+            pool_timeout=5.0,
+        )
+        mgr = DatabaseConnectionManager(cfg)
+        now_utc = datetime.now(timezone.utc)
+        with mgr.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO projects (project_id, name, created_at, updated_at) VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING;",
+                    (self.project_id, "PG E2E Test", now_utc, now_utc),
+                )
+            conn.commit()
+
+        pg_container = create_postgres_container(mgr)
+        try:
+            task = pg_container.task_store.submit_task(
+                project_id=self.project_id,
+                task_type="interaction_execution",
+                payload={"input_text": "Live PostgreSQL background task decision: Use Citus sharding."},
+            )
+            worker = BackgroundWorker(
+                store=pg_container.task_store,
+                project_id=self.project_id,
+                registry=pg_container.task_registry,
+                context=pg_container,
+                worker_id="w_pg_int_e2e",
+                poll_interval=0.05,
+            )
+            worker.start()
+            time.sleep(0.8)
+            worker.stop(timeout=2.0)
+
+            done = pg_container.task_store.get_task(self.project_id, task.task_id)
+            self.assertEqual(done.status, TaskStatus.COMPLETED)
+            self.assertGreaterEqual(pg_container.memory_store.count(project_id=self.project_id), 1)
+        finally:
+            try:
+                with mgr.connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("DELETE FROM background_tasks WHERE project_id = %s;", (self.project_id,))
+                        cur.execute("DELETE FROM memories WHERE project_id = %s;", (self.project_id,))
+                        cur.execute("DELETE FROM interactions WHERE project_id = %s;", (self.project_id,))
+                        cur.execute("DELETE FROM event_lookup WHERE project_id = %s;", (self.project_id,))
+                        cur.execute("DELETE FROM events WHERE project_id = %s;", (self.project_id,))
+                        cur.execute("DELETE FROM projects WHERE project_id = %s;", (self.project_id,))
+                    conn.commit()
+            except Exception:
+                pass
+            pg_container.close()
+            mgr.close()
 
 
 if __name__ == "__main__":

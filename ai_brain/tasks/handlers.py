@@ -43,11 +43,34 @@ def handle_interaction_execution(task: TaskRecord, context: Any = None) -> Dict[
         raise PermanentTaskError("Missing required 'input_text' in interaction task payload.")
 
     project_id = task.project_id
-    interaction_id = payload.get("interaction_id") or f"int_bg_{task.task_id[:16]}"
+    idempotency_key = payload.get("idempotency_key") or task.idempotency_key
+    interaction_id = payload.get("interaction_id") or (
+        f"int_{idempotency_key[:24]}" if idempotency_key else f"int_bg_{task.task_id[:16]}"
+    )
     session_id = payload.get("session_id") or f"sess_{task.task_id[:12]}"
     agent_id = payload.get("agent_id") or "agent-coder"
 
     try:
+        # Check if already completed in interaction store for idempotency protection
+        if hasattr(context.brain_loop, "interaction_store") and context.brain_loop.interaction_store is not None:
+            existing = None
+            if idempotency_key:
+                existing = context.brain_loop.interaction_store.get_by_idempotency_key(idempotency_key)
+            if not existing and interaction_id:
+                existing = context.brain_loop.interaction_store.get(interaction_id)
+            if existing and existing.status.value in ("COMPLETED", "PARTIAL_SUCCESS"):
+                logger.info("Interaction '%s' already completed; returning existing result", existing.interaction_id)
+                comp_res = existing.completion_result
+                return {
+                    "interaction_id": existing.interaction_id,
+                    "status": "COMPLETED",
+                    "agent_response": existing.response.content if existing.response else "",
+                    "memories_created": len(comp_res.extracted_memories) if comp_res else 0,
+                    "graph_nodes_created": comp_res.graph_nodes_integrated if comp_res else 0,
+                    "vectors_indexed": comp_res.vectors_indexed if comp_res else 0,
+                    "already_completed": True,
+                }
+
         # 1. Prepare context
         agent_input = AgentInteractionInput(
             interaction_id=interaction_id,
@@ -58,6 +81,7 @@ def handle_interaction_execution(task: TaskRecord, context: Any = None) -> Dict[
             token_budget=payload.get("max_context_tokens") or 1000,
             query=payload.get("search_query") or input_text,
             metadata=payload.get("metadata") or {},
+            idempotency_key=idempotency_key,
         )
         prep_result = context.brain_loop.prepare_context(agent_input)
 

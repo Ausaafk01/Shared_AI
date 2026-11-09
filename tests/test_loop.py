@@ -23,6 +23,7 @@ from ai_brain.loop import (
     ContextStageError,
     EventPersistenceError,
     ExtractionStageError,
+    InputProcessor,
     InputValidationError,
     InteractionContextResult,
     InteractionNotFoundError,
@@ -155,6 +156,51 @@ class TestBrainLoop(unittest.TestCase):
             AgentInteractionInput(project_id="p", agent_id="a", session_id="s", content="   ")
         with self.assertRaises(InputValidationError):
             AgentInteractionInput(project_id="p", agent_id="a", session_id="s", content="msg", token_budget=-10)
+
+    def test_2b_input_processor_standalone_behavior(self) -> None:
+        """Verify InputProcessor validates types, allows valid inputs, and enforces isolation."""
+        processor = InputProcessor()
+
+        # 1. Non-AgentInteractionInput objects are rejected with InputValidationError
+        with self.assertRaises(InputValidationError) as ctx:
+            processor.process("not-an-input")  # type: ignore
+        self.assertIn("Expected AgentInteractionInput instance", str(ctx.exception))
+
+        with self.assertRaises(InputValidationError):
+            processor.process({"project_id": "p", "content": "hello"})  # type: ignore
+
+        # 2. Valid input passes through unchanged
+        valid_input = AgentInteractionInput(
+            project_id="proj-valid",
+            agent_id="agent-valid",
+            session_id="sess-valid",
+            content="Valid test message",
+        )
+        processed = processor.process(valid_input)
+        self.assertIs(processed, valid_input)
+
+        # 3. Same-project metadata passes through unchanged
+        same_proj_input = AgentInteractionInput(
+            project_id="proj-valid",
+            agent_id="agent-valid",
+            session_id="sess-valid",
+            content="Message with matching target",
+            metadata={"target_project_id": "proj-valid"},
+        )
+        processed_same = processor.process(same_proj_input)
+        self.assertIs(processed_same, same_proj_input)
+
+        # 4. Cross-project metadata raises LoopProjectIsolationError
+        cross_proj_input = AgentInteractionInput(
+            project_id="proj-valid",
+            agent_id="agent-valid",
+            session_id="sess-valid",
+            content="Message with mismatched target",
+            metadata={"target_project_id": "proj-foreign"},
+        )
+        with self.assertRaises(LoopProjectIsolationError) as iso_ctx:
+            processor.process(cross_proj_input)
+        self.assertIn("Cross-project reference detected in metadata", str(iso_ctx.exception))
 
     # 3. Project isolation
     def test_3_project_isolation(self) -> None:

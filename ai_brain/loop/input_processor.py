@@ -27,22 +27,6 @@ class InputProcessor:
                 f"Expected AgentInteractionInput instance, got {type(interaction_input).__name__}"
             )
 
-        # Content validation
-        if not interaction_input.content.strip():
-            raise InputValidationError("Interaction content cannot be empty or purely whitespace")
-
-        # Project ID validation
-        if not interaction_input.project_id.strip():
-            raise InputValidationError("project_id cannot be empty")
-
-        # Agent ID validation
-        if not interaction_input.agent_id.strip():
-            raise InputValidationError("agent_id cannot be empty")
-
-        # Session ID validation
-        if not interaction_input.session_id.strip():
-            raise InputValidationError("session_id cannot be empty")
-
         # Check metadata for unauthorized cross-project references
         if interaction_input.metadata:
             target_proj = interaction_input.metadata.get("target_project_id")

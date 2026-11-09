@@ -5,7 +5,7 @@ Graph traversal engine supporting BFS, DFS, depth limits, cycle detection, and f
 from collections import deque
 from dataclasses import dataclass, field
 import logging
-from typing import Dict, List, Optional, Sequence, Set, Tuple
+from typing import List, Optional, Sequence, Set, Tuple
 
 from ai_brain.graph.exceptions import NodeNotFoundError, ProjectIsolationError, TraversalError
 from ai_brain.graph.graph import KnowledgeGraph

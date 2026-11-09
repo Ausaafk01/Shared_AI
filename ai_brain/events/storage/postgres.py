@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, List, Optional, Union
+from typing import Any, List, Optional
 
 import psycopg
 from psycopg.errors import UniqueViolation

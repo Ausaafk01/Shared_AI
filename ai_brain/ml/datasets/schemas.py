@@ -3,10 +3,10 @@ Schemas for AI Brain machine learning datasets with explicit provenance tracking
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Mapping, Optional, Tuple, Union
 
 
 class ExampleSource(StrEnum):

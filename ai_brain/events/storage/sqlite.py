@@ -5,7 +5,6 @@ Persistent SQLite implementation of the AI Brain Event Storage.
 from datetime import datetime, timezone
 import json
 import logging
-import os
 from pathlib import Path
 import sqlite3
 import threading

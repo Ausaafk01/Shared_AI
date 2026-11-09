@@ -8,13 +8,9 @@ import json
 import logging
 import sqlite3
 import threading
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, List, Optional
 
-from ai_brain.auth.exceptions import (
-    CredentialNotFoundError,
-    MembershipNotFoundError,
-    UserNotFoundError,
-)
+from ai_brain.auth.exceptions import UserNotFoundError
 from ai_brain.auth.models import (
     AgentCredentialRecord,
     ProjectMemberRecord,

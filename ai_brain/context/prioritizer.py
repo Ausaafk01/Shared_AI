@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 import math
 from typing import Optional, Sequence
 
-from ai_brain.context.exceptions import PrioritizationError
 from ai_brain.context.models import PriorityBreakdown
 from ai_brain.retrieval.models import RetrievalItem
 

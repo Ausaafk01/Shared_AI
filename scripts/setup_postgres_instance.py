@@ -1,7 +1,6 @@
 """Setup and manage a local, isolated PostgreSQL test instance for AI Brain."""
 
 import os
-import shutil
 import subprocess
 import sys
 import time

@@ -2,8 +2,7 @@
 Persistent SQLite storage implementation for Session records.
 """
 
-from datetime import datetime, timezone
-import json
+from datetime import datetime
 import logging
 from pathlib import Path
 import sqlite3

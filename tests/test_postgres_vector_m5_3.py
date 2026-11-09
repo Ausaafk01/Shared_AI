@@ -24,22 +24,19 @@ import math
 import os
 import unittest
 import uuid
-from datetime import datetime, timezone
-from typing import Any, List, Optional, Sequence, Tuple
+from datetime import datetime
+from typing import Any, List, Optional
 
-import psycopg
 
 from ai_brain.config import DatabaseConfig, StorageBackend, load_env_file
 from ai_brain.graph.graph import KnowledgeGraph
 from ai_brain.graph.models import GraphNode, GraphRelationship
-from ai_brain.graph.storage.postgres import PostgreSQLGraphStore
 from ai_brain.graph.types import NodeType, RelationshipType
 from ai_brain.memories.models import Memory
 from ai_brain.memories.storage.postgres import PostgreSQLMemoryStore
 from ai_brain.memories.types import MemoryStatus, MemoryType
 from ai_brain.retrieval.engine import RetrievalEngine
 from ai_brain.retrieval.graph_retriever import GraphRetriever
-from ai_brain.retrieval.models import ProcessedQuery, QueryFilters
 from ai_brain.retrieval.types import RetrievalMethod
 from ai_brain.retrieval.vector_retriever import VectorRetriever
 from ai_brain.storage.database import DatabaseConnectionManager
@@ -47,8 +44,6 @@ from ai_brain.vectors.exceptions import (
     DimensionMismatchError,
     DuplicateVectorError,
     PgvectorUnavailableError,
-    ProjectIsolationError,
-    VectorNotFoundError,
     VectorValidationError,
 )
 from ai_brain.vectors.index import VectorIndex

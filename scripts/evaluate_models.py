@@ -4,12 +4,12 @@ Outputs exact confusion matrices, class distributions, per-class metrics, NDCG, 
 score calibration MAE, and group-aware cross-validation with confidence intervals.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import json
 import math
 import os
 import sys
-from typing import List, Sequence, Tuple
+from typing import Sequence, Tuple
 
 # Ensure project root is in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -19,7 +19,7 @@ from ai_brain.memories.models import Memory
 from ai_brain.ml.datasets.builder import DatasetSplitter
 from ai_brain.ml.datasets.schemas import DatasetExample, ExampleProvenance, ExampleSource
 from ai_brain.ml.models.conflict import CONFLICT_CLASSES, ConflictDetectionModel
-from ai_brain.ml.models.duplicate import DuplicateClassification, DuplicateDetectionModel
+from ai_brain.ml.models.duplicate import DuplicateDetectionModel
 from ai_brain.ml.models.importance import MemoryImportanceModel
 from ai_brain.ml.models.ranking import RelevanceRankingModel
 from ai_brain.ml.models.staleness import StalenessDetectionModel

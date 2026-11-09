@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from typing import Any, Generator, Optional, Tuple, Type
 from urllib.parse import urlparse
 
-from ai_brain.config import AppConfig, DatabaseConfig, get_config
+from ai_brain.config import DatabaseConfig, get_config
 
 logger = logging.getLogger(__name__)
 

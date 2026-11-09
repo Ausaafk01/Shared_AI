@@ -2,17 +2,15 @@
 Integration layer converting Memory and Conflict objects into Graph nodes and relationships.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 import logging
-from typing import Dict, List, Optional, Sequence, Union
+from typing import List, Sequence
 
 from ai_brain.graph.graph import KnowledgeGraph
 from ai_brain.graph.models import GraphNode, GraphRelationship
 from ai_brain.graph.types import NodeType, RelationshipType
 from ai_brain.memories.conflicts.models import MemoryConflict
-from ai_brain.memories.conflicts.types import ConflictStatus
 from ai_brain.memories.models import Memory
-from ai_brain.memories.types import MemoryStatus
 
 logger = logging.getLogger(__name__)
 

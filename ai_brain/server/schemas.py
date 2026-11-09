@@ -6,7 +6,6 @@ All models provide strict field validation, detailed descriptions, and OpenAPI 3
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from enum import StrEnum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 

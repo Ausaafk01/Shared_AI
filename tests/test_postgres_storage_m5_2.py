@@ -22,13 +22,11 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-import json
 import os
 import unittest
 import uuid
 
 import psycopg
-from psycopg.errors import UniqueViolation
 
 from ai_brain.agents.models import AgentCapability, AgentRecord, AgentStatus, AgentType
 from ai_brain.agents.registry.postgres import PostgreSQLAgentRegistryStore

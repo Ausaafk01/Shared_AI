@@ -2,9 +2,8 @@
 Textual feature extractors for AI Brain ML components.
 """
 
-import math
 import re
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, Tuple
 
 from ai_brain.ml.base import BaseFeatureExtractor
 

@@ -11,7 +11,6 @@ from ai_brain.memories.models import Memory
 from ai_brain.memories.types import (
     MemoryStatus,
     MemoryType,
-    is_valid_memory_status,
     is_valid_memory_type,
     register_memory_type,
     unregister_memory_type,

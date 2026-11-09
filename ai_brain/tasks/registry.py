@@ -9,12 +9,10 @@ from concurrent.futures import ThreadPoolExecutor
 import inspect
 import logging
 import time
-from typing import Any, Callable, Coroutine, Dict, Optional, Union
+from typing import Any, Callable, Dict, Optional
 
 from ai_brain.tasks.exceptions import (
     PermanentTaskError,
-    TaskError,
-    TaskExecutionError,
     TransientTaskError,
 )
 from ai_brain.tasks.models import TaskRecord, TaskResult

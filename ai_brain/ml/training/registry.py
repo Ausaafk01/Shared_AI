@@ -2,7 +2,7 @@
 Model registry for managing active models, versions, and fallback policies.
 """
 
-from typing import Dict, Optional
+from typing import Dict
 
 from ai_brain.ml.base import BaseMLModel, ModelType
 from ai_brain.ml.exceptions import ModelNotFoundError

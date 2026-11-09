@@ -4,7 +4,6 @@ Tokenizer abstraction and deterministic offline fallback for Context Builder.
 
 from abc import ABC, abstractmethod
 import re
-from typing import Sequence
 
 from ai_brain.context.exceptions import TokenizerError
 

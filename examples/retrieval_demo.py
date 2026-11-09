@@ -8,7 +8,7 @@ Demonstration of AI Brain Retrieval Engine:
 - Project isolation and transparent relevance scoring
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 import sys
 
@@ -20,7 +20,6 @@ from ai_brain.graph.models import GraphRelationship
 from ai_brain.memories import Memory, MemoryType, MemoryStatus
 from ai_brain.retrieval import (
     RetrievalEngine,
-    RetrievalMethod,
     QueryFilters,
     HybridFusion,
     RelevanceScorer,

@@ -17,7 +17,7 @@ import tempfile
 import time
 from typing import Optional
 
-from ai_brain.config import AppConfig, load_config_from_env
+from ai_brain.config import load_config_from_env
 from ai_brain.observability.logging import setup_structured_logging
 from ai_brain.server.dependencies import create_container_from_config
 from ai_brain.tasks.fleet import WorkerFleet

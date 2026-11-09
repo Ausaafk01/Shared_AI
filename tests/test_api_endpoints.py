@@ -63,33 +63,22 @@ from fastapi.testclient import TestClient
 
 from ai_brain.server.idempotency import (
     IdempotencyStatus,
-    PostgreSQLIdempotencyCoordinator,
     SQLiteIdempotencyCoordinator,
     StaleFencingTokenError,
 )
 from ai_brain.loop.models import AgentInteractionInput, InteractionRecord, InteractionStatus
 
 from ai_brain.auth import (
-    AuthenticatedIdentity,
-    AuthenticationService,
-    AuthorizationService,
     CreatedApiKey,
     IdentityType,
-    KeyManager,
-    Permission,
     ProjectMemberRecord,
     ProjectRole,
-    SecurityAuditLogger,
-    TokenService,
     UserRecord,
-    generate_api_key,
 )
-from ai_brain.auth.store import SQLiteAuthStore
 from ai_brain.config import DatabaseConfig, StorageBackend, load_env_file
 from ai_brain.server.app import create_app
 from ai_brain.server.limiter import HttpRateLimiter
 from ai_brain.server.dependencies import (
-    BrainServiceContainer,
     create_postgres_container,
     create_sqlite_container,
 )

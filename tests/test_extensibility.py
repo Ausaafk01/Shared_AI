@@ -10,7 +10,6 @@ from ai_brain.events.exceptions import EventValidationError
 from ai_brain.events.models import Event
 from ai_brain.events.storage.sqlite import SQLiteEventStore
 from ai_brain.events.types import (
-    EventType,
     is_valid_event_type,
     register_event_type,
     unregister_event_type,

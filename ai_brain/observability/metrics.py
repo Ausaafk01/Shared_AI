@@ -10,9 +10,7 @@ Exposes metrics strictly conforming to Prometheus Text-Based Exposition Format (
 
 from __future__ import annotations
 
-import math
 import threading
-import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 

@@ -3,21 +3,14 @@ MLService facade integrating all ML models, feedback, and deterministic fallback
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, List, Optional, Sequence
 
-from ai_brain.memories.conflicts.models import MemoryConflict
-from ai_brain.memories.conflicts.types import ConflictStatus, ConflictType
 from ai_brain.memories.models import Memory
-from ai_brain.memories.updating.comparison import ComparisonResult, MemoryRelation
+from ai_brain.memories.updating.comparison import MemoryRelation
 from ai_brain.ml.base import ModelPrediction
 from ai_brain.ml.feedback.collector import FeedbackCollector
-from ai_brain.ml.feedback.models import FeedbackRecord
 from ai_brain.ml.integration.config import MLConfiguration
-from ai_brain.ml.models.conflict import ConflictDetectionModel
-from ai_brain.ml.models.duplicate import DuplicateClassification, DuplicateDetectionModel
-from ai_brain.ml.models.importance import MemoryImportanceModel
-from ai_brain.ml.models.ranking import RelevanceRankingModel
-from ai_brain.ml.models.staleness import StalenessDetectionModel
+from ai_brain.ml.models.duplicate import DuplicateClassification
 from ai_brain.ml.training.registry import ModelRegistry
 from ai_brain.retrieval.models import RetrievalItem
 

@@ -7,35 +7,28 @@ import unittest
 
 from ai_brain.graph.graph import KnowledgeGraph
 from ai_brain.graph.integration import GraphIntegrator
-from ai_brain.graph.types import RelationshipType, TraversalDirection
+from ai_brain.graph.types import RelationshipType
 from ai_brain.memories.models import Memory
 from ai_brain.memories.types import MemoryStatus, MemoryType
 from ai_brain.retrieval.engine import RetrievalEngine
 from ai_brain.retrieval.exceptions import (
-    GraphRetrievalError,
-    HybridFusionError,
     ProjectIsolationError,
     QueryValidationError,
-    RetrievalError,
-    RetrievalExecutionError,
     VectorRetrievalError,
 )
 from ai_brain.retrieval.fusion import FusedCandidate, HybridFusion
-from ai_brain.retrieval.graph_retriever import GraphMatch, GraphRetriever
+from ai_brain.retrieval.graph_retriever import GraphRetriever
 from ai_brain.retrieval.models import (
-    ProcessedQuery,
     QueryFilters,
     RetrievalItem,
     RetrievalResponse,
-    ScoreBreakdown,
 )
 from ai_brain.retrieval.query import QueryProcessor
 from ai_brain.retrieval.scoring import RelevanceScorer
-from ai_brain.retrieval.types import RetrievalMethod, SeedStrategy
+from ai_brain.retrieval.types import RetrievalMethod
 from ai_brain.retrieval.vector_retriever import VectorRetriever
 from ai_brain.vectors.index import VectorIndex
 from ai_brain.vectors.manager import VectorMemoryManager
-from ai_brain.vectors.models import VectorMatch, VectorRecord
 from ai_brain.vectors.providers.mock import MockEmbeddingProvider
 from ai_brain.vectors.storage.sqlite import SQLiteVectorStore
 

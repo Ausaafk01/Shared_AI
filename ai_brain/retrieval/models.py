@@ -6,11 +6,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
 from types import MappingProxyType
-from typing import Any, Mapping, Optional, Sequence, Union
+from typing import Any, Mapping, Optional
 import uuid
 
 from ai_brain.retrieval.exceptions import QueryValidationError, RetrievalExecutionError
-from ai_brain.retrieval.types import RetrievalMethod, normalize_retrieval_method
+from ai_brain.retrieval.types import RetrievalMethod
 
 
 from ai_brain.common.freeze import _freeze_container, _unfreeze_container

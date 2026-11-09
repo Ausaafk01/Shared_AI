@@ -4,13 +4,13 @@ VectorMemoryManager orchestrating memory lifecycle integration, version tracking
 
 import hashlib
 import logging
-from typing import List, Optional, Sequence, Set, Union
+from typing import List, Optional, Sequence, Union
 
 from ai_brain.memories.models import Memory
 from ai_brain.memories.types import MemoryStatus
-from ai_brain.vectors.exceptions import ProjectIsolationError, VectorValidationError
+from ai_brain.vectors.exceptions import VectorValidationError
 from ai_brain.vectors.index import VectorIndex
-from ai_brain.vectors.models import VectorMatch, VectorRecord, VectorSearchResult
+from ai_brain.vectors.models import VectorRecord, VectorSearchResult
 from ai_brain.vectors.providers.base import EmbeddingProvider
 from ai_brain.vectors.storage.base import VectorStore
 

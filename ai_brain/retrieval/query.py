@@ -3,7 +3,7 @@ Modular, LLM-independent query processing for AI Brain retrieval.
 """
 
 import re
-from typing import Mapping, Optional, Sequence, Set
+from typing import Optional, Sequence, Set
 
 from ai_brain.retrieval.exceptions import ProjectIsolationError, QueryValidationError
 from ai_brain.retrieval.models import ProcessedQuery, QueryFilters

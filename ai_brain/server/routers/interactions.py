@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import json
 import logging
 import uuid
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
@@ -16,7 +16,7 @@ from ai_brain.agents.simulated.coding import CodingAgent
 from ai_brain.agents.simulated.research import ResearchAgent
 from ai_brain.agents.simulated.review import ReviewAgent
 from ai_brain.auth import AuthenticatedIdentity, Permission
-from ai_brain.loop.exceptions import InputValidationError, ResponseValidationError
+from ai_brain.loop.exceptions import InputValidationError
 from ai_brain.loop.models import (
     AgentInteractionInput,
     AgentResponseInput,

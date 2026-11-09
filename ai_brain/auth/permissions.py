@@ -17,7 +17,7 @@ Exactly 28 granular permissions across 11 functional domains:
 
 from __future__ import annotations
 
-from typing import FrozenSet, Mapping, Optional, Sequence, Set, Tuple
+from typing import FrozenSet, Mapping, Optional, Sequence, Tuple
 from ai_brain.auth.exceptions import PermissionDeniedError, PrivilegeEscalationError
 from ai_brain.auth.models import Permission, ProjectRole
 

@@ -3,7 +3,7 @@ Enumerations and types for the Retrieval Engine subsystem.
 """
 
 from enum import Enum
-from typing import Sequence, Union
+from typing import Union
 
 
 class RetrievalMethod(str, Enum):

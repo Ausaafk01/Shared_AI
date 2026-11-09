@@ -2,7 +2,7 @@
 Session Manager providing session continuity, lifecycle tracking, and agent switching.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 import logging
 from typing import Any, List, Mapping, Optional
 import uuid

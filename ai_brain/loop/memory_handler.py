@@ -2,7 +2,7 @@
 Memory extraction, updating, conflict management, and integration handler for Brain Loop.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import logging
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -20,7 +20,7 @@ from ai_brain.memories.conflicts.models import MemoryConflict
 from ai_brain.memories.extraction.extractor import MemoryExtractor
 from ai_brain.memories.models import Memory
 from ai_brain.memories.types import MemoryStatus
-from ai_brain.memories.updating.updater import MemoryUpdater, UpdateAction, UpdateResult
+from ai_brain.memories.updating.updater import MemoryUpdater, UpdateResult
 from ai_brain.vectors.manager import VectorMemoryManager
 
 logger = logging.getLogger(__name__)

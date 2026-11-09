@@ -40,7 +40,6 @@ from ai_brain.observability.metrics import get_metrics_registry
 from ai_brain.server.dependencies import (
     BrainServiceContainer,
     create_container_from_config,
-    create_sqlite_container,
 )
 from ai_brain.server.limiter import HttpRateLimiter, RateLimitMiddleware
 from ai_brain.server.middleware import (
@@ -57,7 +56,6 @@ from ai_brain.server.routers import (
     workflows,
 )
 from ai_brain.server.schemas import (
-    ErrorResponse,
     HealthResponse,
     ReadyResponse,
 )

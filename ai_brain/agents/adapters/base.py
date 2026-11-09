@@ -6,8 +6,7 @@ from abc import abstractmethod
 import json
 import logging
 import os
-import time
-from typing import Any, Callable, Dict, Mapping, Optional
+from typing import Any, Callable, Dict, Optional
 import urllib.error
 import urllib.request
 
@@ -20,11 +19,8 @@ from ai_brain.agents.exceptions import (
     ProviderRateLimitError,
 )
 from ai_brain.agents.models import (
-    AgentCapability,
     AgentExecutionRequest,
     AgentRecord,
-    AgentStatus,
-    AgentType,
 )
 from ai_brain.loop.models import InteractionContextResult
 

@@ -27,7 +27,6 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import logging
-import os
 from pathlib import Path
 import sqlite3
 import threading
@@ -37,7 +36,6 @@ import uuid
 from ai_brain.storage.database import DatabaseConnectionManager
 from ai_brain.tasks.exceptions import (
     DuplicateTaskError,
-    TaskClaimError,
     TaskFencingError,
     TaskNotFoundError,
 )

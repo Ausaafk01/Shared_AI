@@ -2,7 +2,7 @@
 Persistent SQLite storage implementation for Brain Loop interactions.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 import json
 import logging
 from pathlib import Path

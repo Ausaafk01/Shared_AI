@@ -2,7 +2,7 @@
 Simulated Research Agent specialized in information gathering and research findings.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Callable, Iterator, Mapping, Optional
 
 from ai_brain.agents.base import Agent

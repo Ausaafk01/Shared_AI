@@ -4,7 +4,6 @@ Automated tests for persistent event storage, retrieval, ordering, filtering, an
 
 from datetime import datetime, timezone, timedelta
 import gc
-import os
 from pathlib import Path
 import sqlite3
 import tempfile

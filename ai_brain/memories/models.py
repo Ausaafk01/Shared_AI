@@ -14,8 +14,6 @@ from .exceptions import MemoryValidationError
 from .types import (
     MemoryStatus,
     MemoryType,
-    is_valid_memory_status,
-    is_valid_memory_type,
     normalize_memory_status,
     normalize_memory_type,
 )

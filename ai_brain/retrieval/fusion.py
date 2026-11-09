@@ -2,11 +2,11 @@
 Hybrid retrieval fusion using Reciprocal Rank Fusion (RRF).
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import logging
 from types import MappingProxyType
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from ai_brain.retrieval.exceptions import HybridFusionError
 from ai_brain.retrieval.graph_retriever import GraphMatch

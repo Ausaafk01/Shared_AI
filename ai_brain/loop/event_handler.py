@@ -2,16 +2,15 @@
 Event handling and persistence layer for the Brain Loop subsystem.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 import logging
-from typing import Any, Mapping, Optional, Sequence
+from typing import Sequence
 import uuid
 
 from ai_brain.events import (
     DuplicateEventError,
     Event,
     EventStore,
-    EventType,
     create_event,
     register_event_type,
 )

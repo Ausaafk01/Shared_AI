@@ -5,7 +5,6 @@ Context compression and deduplication for Context Builder.
 import re
 from typing import Sequence
 
-from ai_brain.context.exceptions import CompressionError
 from ai_brain.context.models import PriorityBreakdown
 from ai_brain.retrieval.models import RetrievalItem
 

@@ -11,7 +11,7 @@ from typing import Any, Mapping, Optional, Sequence
 import uuid
 
 from .exceptions import EventValidationError
-from .types import EventType, is_valid_event_type, normalize_event_type
+from .types import EventType, normalize_event_type
 
 
 def _json_serializer(obj: Any) -> Any:

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from enum import StrEnum
 import json
 from types import MappingProxyType
-from typing import Any, Mapping, Optional, Sequence, Union
+from typing import Any, Mapping, Optional
 import uuid
 
 from ai_brain.context.models import ContextPackage

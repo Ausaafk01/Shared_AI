@@ -8,14 +8,12 @@ import unittest
 from ai_brain.graph import (
     DuplicateNodeError,
     DuplicateRelationshipError,
-    GraphError,
     GraphIntegrator,
     GraphNode,
     GraphRelationship,
     GraphTraversal,
     GraphValidationError,
     KnowledgeGraph,
-    NodeNotFoundError,
     NodeType,
     ProjectIsolationError,
     RelationshipType,
@@ -25,13 +23,11 @@ from ai_brain.graph import (
     get_event_node_id,
     get_memory_node_id,
     get_project_node_id,
-    register_node_type,
-    register_relationship_type,
 )
 from ai_brain.memories.conflicts.models import MemoryConflict
 from ai_brain.memories.conflicts.types import ConflictStatus, ConflictType
 from ai_brain.memories.models import Memory
-from ai_brain.memories.types import MemoryStatus, MemoryType
+from ai_brain.memories.types import MemoryType
 
 
 class TestKnowledgeGraph(unittest.TestCase):

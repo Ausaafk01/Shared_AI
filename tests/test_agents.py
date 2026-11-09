@@ -2,16 +2,14 @@
 Automated unit tests for Agent Abstraction, Registry, and Simulated Agents in AI Brain.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 import os
 import tempfile
 import unittest
-from unittest.mock import MagicMock
 
 from ai_brain.agents import (
     Agent,
     AgentCapability,
-    AgentExecutionError,
     AgentExecutionRequest,
     AgentRecord,
     AgentRegistry,
@@ -32,7 +30,6 @@ from ai_brain.loop import BrainLoop, SQLiteInteractionStore
 from ai_brain.memories import (
     ConflictDetector,
     ConflictManager,
-    Memory,
     MemoryExtractor,
     MemoryStatus,
     MemoryType,

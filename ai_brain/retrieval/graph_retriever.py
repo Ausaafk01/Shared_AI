@@ -2,19 +2,17 @@
 Graph-based memory retrieval using Knowledge Graph traversal with strict project isolation.
 """
 
-from collections import defaultdict
 from dataclasses import dataclass, field
 import logging
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
-from ai_brain.graph.exceptions import NodeNotFoundError, ProjectIsolationError
+from ai_brain.graph.exceptions import ProjectIsolationError
 from ai_brain.graph.graph import KnowledgeGraph
 from ai_brain.graph.models import GraphNode
 from ai_brain.graph.traversal import GraphTraversal, TraversalResult
 from ai_brain.graph.types import NodeType, RelationshipType, TraversalAlgorithm, TraversalDirection
 from ai_brain.retrieval.exceptions import GraphRetrievalError
 from ai_brain.retrieval.models import ProcessedQuery, QueryFilters
-from ai_brain.retrieval.types import SeedStrategy
 
 logger = logging.getLogger(__name__)
 

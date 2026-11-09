@@ -5,9 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import logging
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, List, Optional, Sequence
 
-import psycopg
 
 from ai_brain.ml.feedback.models import FeedbackRecord, FeedbackSignal, FeedbackType
 from ai_brain.ml.feedback.store import FeedbackStore

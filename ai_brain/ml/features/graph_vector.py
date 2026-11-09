@@ -2,7 +2,7 @@
 Graph structure, vector similarity, and provenance feature extractors.
 """
 
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any, Dict, Tuple
 
 from ai_brain.ml.base import BaseFeatureExtractor
 

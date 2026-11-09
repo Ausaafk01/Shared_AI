@@ -2,8 +2,7 @@
 Comprehensive test suite for AI Brain Vector Memory subsystem.
 """
 
-from datetime import datetime, timezone
-import os
+from datetime import datetime
 from pathlib import Path
 import tempfile
 import unittest
@@ -13,21 +12,12 @@ from ai_brain.memories.types import MemoryStatus, MemoryType
 from ai_brain.vectors import (
     DimensionMismatchError,
     DuplicateVectorError,
-    EmbeddingError,
-    EmbeddingProvider,
     EmbeddingProviderError,
     MockEmbeddingProvider,
-    ProjectIsolationError,
     SQLiteVectorStore,
-    VectorError,
     VectorIndex,
-    VectorMatch,
     VectorMemoryManager,
-    VectorNotFoundError,
     VectorRecord,
-    VectorSearchResult,
-    VectorStorageError,
-    VectorStore,
     VectorValidationError,
     compute_cosine_similarity,
 )

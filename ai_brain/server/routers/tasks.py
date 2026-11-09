@@ -7,7 +7,6 @@ to submit asynchronous durable tasks and inspect their execution state.
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from ai_brain.auth import AuthenticatedIdentity, Permission
@@ -22,7 +21,7 @@ from ai_brain.server.schemas import (
     TaskSubmitRequest,
     TaskSubmitResponse,
 )
-from ai_brain.tasks.exceptions import DuplicateTaskError, TaskNotFoundError
+from ai_brain.tasks.exceptions import DuplicateTaskError
 
 logger = logging.getLogger("ai_brain.server.routers.tasks")
 

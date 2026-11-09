@@ -23,20 +23,14 @@ from ai_brain.loop import (
     ContextStageError,
     EventPersistenceError,
     ExtractionStageError,
-    InputProcessor,
     InputValidationError,
-    InteractionCompletionResult,
     InteractionContextResult,
     InteractionNotFoundError,
     InteractionRecord,
-    InteractionStateError,
     InteractionStatus,
-    LoopEventHandler,
-    LoopMemoryHandler,
     LoopProjectIsolationError,
     LoopStage,
     MemoryUpdateStageError,
-    ResponseCapture,
     ResponseValidationError,
     RetrievalStageError,
     SQLiteInteractionStore,
@@ -50,7 +44,7 @@ from ai_brain.memories import (
     MemoryType,
     MemoryUpdater,
 )
-from ai_brain.retrieval import RetrievalEngine, RetrievalMethod
+from ai_brain.retrieval import RetrievalEngine
 from ai_brain.loop.storage.postgres import PostgreSQLInteractionStore
 from ai_brain.server.idempotency import _resolve_existing_record
 from ai_brain.storage.database import DatabaseConnectionManager

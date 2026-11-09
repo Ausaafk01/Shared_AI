@@ -7,20 +7,14 @@ import unittest
 
 from ai_brain.memories.exceptions import (
     InvalidUpdateOperationError,
-    MemoryValidationError,
     VersionConflictError,
 )
 from ai_brain.memories.models import Memory
 from ai_brain.memories.types import MemoryStatus, MemoryType
 from ai_brain.memories.updating import (
-    ComparisonResult,
-    MemoryComparator,
-    MemoryRelation,
     MemoryUpdater,
     MemoryVersionHistory,
     UpdateAction,
-    UpdateResult,
-    VersionTracker,
 )
 
 

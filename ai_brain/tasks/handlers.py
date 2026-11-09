@@ -13,7 +13,7 @@ from ai_brain.agents.simulated.research import ResearchAgent
 from ai_brain.agents.simulated.review import ReviewAgent
 from ai_brain.loop.models import AgentInteractionInput, AgentResponseInput
 from ai_brain.tasks.exceptions import PermanentTaskError, TransientTaskError
-from ai_brain.tasks.models import TaskRecord, TaskResult
+from ai_brain.tasks.models import TaskRecord
 from ai_brain.tasks.registry import TaskHandlerRegistry
 
 logger = logging.getLogger("ai_brain.tasks.handlers")

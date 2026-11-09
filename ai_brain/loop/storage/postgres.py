@@ -5,9 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import logging
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, List, Optional, Sequence, Union
 
-import psycopg
 
 from ai_brain.loop.exceptions import BrainLoopError
 from ai_brain.loop.models import InteractionRecord, InteractionStatus

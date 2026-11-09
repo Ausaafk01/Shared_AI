@@ -5,15 +5,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import logging
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence
 
 import psycopg
-from psycopg.errors import ForeignKeyViolation
 
-from ai_brain.graph.exceptions import GraphValidationError, NodeNotFoundError, ProjectIsolationError
+from ai_brain.graph.exceptions import GraphValidationError, NodeNotFoundError
 from ai_brain.graph.models import GraphNode, GraphRelationship, _freeze_container, _unfreeze_container
 from ai_brain.graph.storage.base import GraphStore
-from ai_brain.graph.types import normalize_node_type, normalize_relationship_type
 from ai_brain.storage.database import DatabaseConnectionManager, get_database_manager
 
 logger = logging.getLogger(__name__)

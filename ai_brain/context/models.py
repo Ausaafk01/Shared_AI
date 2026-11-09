@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
 from types import MappingProxyType
-from typing import Any, Mapping, Optional, Sequence, Union
+from typing import Any, Mapping, Optional
 import uuid
 
 from ai_brain.context.exceptions import ContextBuilderError

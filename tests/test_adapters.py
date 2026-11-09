@@ -7,9 +7,9 @@ import os
 import unittest
 from unittest.mock import patch
 
-from ai_brain.agents.adapters.antigravity import AntigravityAdapter, AntigravityAgentAdapter
+from ai_brain.agents.adapters.antigravity import AntigravityAgentAdapter
 from ai_brain.agents.adapters.claude import ClaudeAdapter
-from ai_brain.agents.adapters.codex import CodexAdapter, CodexAgentAdapter, OpenAIModelAdapter
+from ai_brain.agents.adapters.codex import CodexAgentAdapter, OpenAIModelAdapter
 from ai_brain.agents.adapters.gemini import GeminiAdapter
 from ai_brain.agents.exceptions import (
     AgentTimeoutError,

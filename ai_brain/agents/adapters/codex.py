@@ -15,7 +15,6 @@ from ai_brain.agents.exceptions import (
     ProviderAdapterError,
     ProviderAuthenticationError,
     ProviderConnectionError,
-    ProviderRateLimitError,
 )
 from ai_brain.agents.models import (
     AgentCapability,

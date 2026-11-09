@@ -8,21 +8,19 @@ import shutil
 import tempfile
 import unittest
 
-from ai_brain.events.models import Event
 from ai_brain.events.storage.sqlite import SQLiteEventStore
 from ai_brain.loop.orchestrator import BrainLoop
 from ai_brain.memories.conflicts.types import ConflictType
 from ai_brain.memories.models import Memory
-from ai_brain.ml.base import ModelMetadata, ModelPrediction, ModelType
 from ai_brain.ml.datasets.builder import DatasetSplitter
 from ai_brain.ml.datasets.schemas import DatasetExample, DatasetSplit, ExampleProvenance, ExampleSource
 from ai_brain.ml.datasets.validator import DatasetValidator
-from ai_brain.ml.exceptions import DatasetValidationError, ModelNotTrainedError
+from ai_brain.ml.exceptions import DatasetValidationError
 from ai_brain.ml.features.graph_vector import GraphVectorFeatureExtractor
 from ai_brain.ml.features.temporal import TemporalFeatureExtractor
 from ai_brain.ml.features.text import TextFeatureExtractor
 from ai_brain.ml.feedback.collector import FeedbackCollector
-from ai_brain.ml.feedback.models import FeedbackRecord, FeedbackSignal, FeedbackType
+from ai_brain.ml.feedback.models import FeedbackSignal, FeedbackType
 from ai_brain.ml.feedback.store import SQLiteFeedbackStore
 from ai_brain.ml.integration.config import MLConfiguration
 from ai_brain.ml.integration.service import MLService
@@ -31,13 +29,10 @@ from ai_brain.ml.models.duplicate import DuplicateClassification, DuplicateDetec
 from ai_brain.ml.models.importance import MemoryImportanceModel
 from ai_brain.ml.models.ranking import RelevanceRankingModel
 from ai_brain.ml.models.staleness import StalenessDetectionModel
-from ai_brain.ml.training.evaluator import ModelEvaluationReport, ModelEvaluator
-from ai_brain.ml.training.pipeline import TrainingPipeline
-from ai_brain.ml.training.registry import ModelRegistry
+from ai_brain.ml.training.evaluator import ModelEvaluator
 from ai_brain.retrieval.engine import RetrievalEngine
-from ai_brain.retrieval.models import QueryFilters, RetrievalItem, ScoreBreakdown
+from ai_brain.retrieval.models import RetrievalItem, ScoreBreakdown
 from ai_brain.retrieval.types import RetrievalMethod
-from ai_brain.vectors.index import VectorIndex
 from ai_brain.vectors.manager import VectorMemoryManager
 from ai_brain.vectors.providers.mock import MockEmbeddingProvider
 from ai_brain.vectors.storage.sqlite import SQLiteVectorStore

@@ -2,7 +2,6 @@
 Immutable MemoryConflict model for AI Brain Conflict Management.
 """
 
-from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json

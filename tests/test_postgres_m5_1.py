@@ -20,15 +20,11 @@ from __future__ import annotations
 import os
 import unittest
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
 import psycopg
 from ai_brain.config import DatabaseConfig, StorageBackend, load_env_file
-from ai_brain.storage.database import (
-    ConnectionUnavailableError,
-    DatabaseConnectionManager,
-    DriverNotInstalledError,
-)
+from ai_brain.storage.database import DatabaseConnectionManager
 
 # Load local test environment variables if present
 load_env_file()

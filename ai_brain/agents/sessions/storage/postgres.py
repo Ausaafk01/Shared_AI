@@ -5,9 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import logging
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, List, Optional, Sequence
 
-import psycopg
 
 from ai_brain.agents.exceptions import SessionError
 from ai_brain.agents.sessions.models import SessionRecord, SessionStatus

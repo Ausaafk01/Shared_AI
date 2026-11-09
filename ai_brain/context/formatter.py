@@ -2,7 +2,7 @@
 Formatting and rendering for Context Builder.
 """
 
-from typing import Any, Optional, Sequence
+from typing import Any, Sequence
 
 from ai_brain.context.models import ContextItem, ContextSection
 

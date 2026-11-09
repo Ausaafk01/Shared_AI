@@ -13,17 +13,12 @@ from typing import Any, Optional, Sequence
 from ai_brain.observability.metrics import get_metrics_registry
 from ai_brain.tasks.exceptions import (
     PermanentTaskError,
-    TaskCancelledError,
-    TaskError,
     TaskFencingError,
-    TransientTaskError,
-    WorkerError,
 )
 from ai_brain.tasks.models import (
     RetryPolicy,
     TaskRecord,
     TaskResult,
-    TaskStatus,
     WorkerInfo,
     WorkerState,
 )

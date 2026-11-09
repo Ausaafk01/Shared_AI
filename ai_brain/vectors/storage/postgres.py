@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import json
 import logging
 import math
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import psycopg
 from psycopg.errors import UniqueViolation

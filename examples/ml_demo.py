@@ -11,32 +11,25 @@ Demonstrates:
 """
 
 from datetime import datetime, timedelta, timezone
-import json
 from pathlib import Path
 import sys
 
 # Ensure workspace root is in sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from ai_brain.events.storage.sqlite import SQLiteEventStore
-from ai_brain.memories.conflicts.types import ConflictType
 from ai_brain.memories.models import Memory
 from ai_brain.ml.datasets.builder import DatasetSplitter
 from ai_brain.ml.datasets.schemas import DatasetExample, ExampleProvenance, ExampleSource
 from ai_brain.ml.feedback.collector import FeedbackCollector
-from ai_brain.ml.feedback.models import FeedbackSignal, FeedbackType
+from ai_brain.ml.feedback.models import FeedbackType
 from ai_brain.ml.feedback.store import SQLiteFeedbackStore
-from ai_brain.ml.integration.config import MLConfiguration
-from ai_brain.ml.integration.service import MLService
 from ai_brain.ml.models.conflict import ConflictDetectionModel
-from ai_brain.ml.models.duplicate import DuplicateClassification, DuplicateDetectionModel
+from ai_brain.ml.models.duplicate import DuplicateDetectionModel
 from ai_brain.ml.models.importance import MemoryImportanceModel
 from ai_brain.ml.models.ranking import RelevanceRankingModel
 from ai_brain.ml.models.staleness import StalenessDetectionModel
-from ai_brain.ml.training.evaluator import ModelEvaluationReport, ModelEvaluator
-from ai_brain.ml.training.pipeline import TrainingPipeline
+from ai_brain.ml.training.evaluator import ModelEvaluator
 from ai_brain.retrieval.engine import RetrievalEngine
-from ai_brain.retrieval.models import ScoreBreakdown
 from ai_brain.retrieval.types import RetrievalMethod
 from ai_brain.vectors.manager import VectorMemoryManager
 from ai_brain.vectors.providers.mock import MockEmbeddingProvider

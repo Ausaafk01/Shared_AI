@@ -2,7 +2,7 @@
 Dataset validation and integrity checking for AI Brain ML layer.
 """
 
-from typing import List, Sequence, Set, Tuple
+from typing import Sequence, Set
 
 from ai_brain.ml.datasets.schemas import DatasetExample, DatasetSplit
 from ai_brain.ml.exceptions import DatasetValidationError

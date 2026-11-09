@@ -4,7 +4,7 @@ Runs all 10 multi-session scenarios under Condition A (Without Brain) and Condit
 Generates human-readable Markdown and machine-readable JSON reports.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 import os
 import sys
 

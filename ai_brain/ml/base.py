@@ -4,11 +4,10 @@ Base abstractions and schemas for AI Brain ML models and features.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import StrEnum
-import json
 from types import MappingProxyType
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Mapping, Optional, Tuple, Union
 
 
 class ModelType(StrEnum):

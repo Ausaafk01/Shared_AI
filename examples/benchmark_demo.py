@@ -9,7 +9,6 @@ Executes live comparisons across the 6 key demonstration dimensions:
 6. Overall benchmark report generation.
 """
 
-import os
 from pathlib import Path
 import sys
 
@@ -21,7 +20,6 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from ai_brain.benchmarks.dataset import BenchmarkDataset
 from ai_brain.benchmarks.evaluator import BenchmarkEvaluator
-from ai_brain.benchmarks.reporter import BenchmarkReporter
 from ai_brain.benchmarks.runner import BenchmarkRunner
 from ai_brain.benchmarks.statistics import BenchmarkStatistics
 

@@ -3,11 +3,10 @@ Feedback record schemas for AI Brain ML layer.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple, Union
-import uuid
+from typing import Any, Dict, Mapping, Optional, Tuple, Union
 
 
 class FeedbackType(StrEnum):

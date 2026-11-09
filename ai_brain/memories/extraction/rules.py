@@ -4,9 +4,9 @@ Extraction rules and classification logic for AI Brain Memory Extraction.
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import datetime
 import re
-from typing import Any, List, Optional, Sequence
+from typing import List, Optional, Sequence
 
 from ai_brain.events.models import Event
 from ai_brain.events.types import EventType

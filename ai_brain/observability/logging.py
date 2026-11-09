@@ -14,7 +14,7 @@ import logging
 import re
 import sys
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 # Secret patterns to redact
 _SENSITIVE_PATTERNS = [

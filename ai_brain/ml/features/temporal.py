@@ -4,7 +4,7 @@ Temporal and lifecycle feature extractors for AI Brain ML components.
 
 from datetime import datetime, timezone
 import math
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 
 from ai_brain.ml.base import BaseFeatureExtractor
 

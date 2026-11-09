@@ -4,7 +4,7 @@ Dataset split builder and partitioning with grouping by source memories to preve
 
 from collections import defaultdict
 import random
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Sequence
 
 from ai_brain.ml.datasets.schemas import DatasetExample, DatasetSplit
 from ai_brain.ml.datasets.validator import DatasetValidator

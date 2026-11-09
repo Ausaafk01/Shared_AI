@@ -10,15 +10,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import logging
-from typing import Any, Dict, List, Optional
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from ai_brain.agents.collaboration.models import (
     CollaborationStep,
-    CollaborationStepResult,
     CollaborationWorkflowRecord,
-    WorkflowStatus,
 )
 from ai_brain.agents.simulated import CodingAgent, ResearchAgent, ReviewAgent
 from ai_brain.auth import AuthenticatedIdentity, Permission
@@ -28,7 +25,6 @@ from ai_brain.server.dependencies import (
     require_permission,
 )
 from ai_brain.server.schemas import (
-    CollaborationStepDTO,
     CollaborationStepResultDTO,
     ErrorResponse,
     WorkflowCreateRequest,

@@ -3,7 +3,7 @@ Helper structures and parsing utilities for memory extraction.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 import re
 from typing import Any, Mapping, Optional, Sequence
 

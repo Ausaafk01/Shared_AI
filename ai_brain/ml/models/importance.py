@@ -6,12 +6,12 @@ from datetime import datetime, timezone
 import json
 import math
 from types import MappingProxyType
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Optional
 
 from ai_brain.memories.models import Memory
 from ai_brain.ml.base import BaseMLModel, ModelMetadata, ModelPrediction, ModelType
 from ai_brain.ml.datasets.schemas import DatasetSplit
-from ai_brain.ml.exceptions import FeatureExtractionError, ModelNotTrainedError
+from ai_brain.ml.exceptions import ModelNotTrainedError
 from ai_brain.ml.features.temporal import TemporalFeatureExtractor
 from ai_brain.ml.features.text import TextFeatureExtractor
 

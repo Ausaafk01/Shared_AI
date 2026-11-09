@@ -2,13 +2,12 @@
 Training pipeline and model version management for AI Brain ML models.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 import os
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 
-from ai_brain.ml.base import BaseMLModel, ModelMetadata, ModelType
+from ai_brain.ml.base import BaseMLModel, ModelType
 from ai_brain.ml.datasets.schemas import DatasetSplit, ExampleSource
-from ai_brain.ml.exceptions import ModelNotTrainedError
 from ai_brain.ml.training.evaluator import ModelEvaluationReport, ModelEvaluator
 
 

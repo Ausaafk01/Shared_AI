@@ -2,8 +2,7 @@
 Persistent SQLite storage implementation for Agent Registry records.
 """
 
-from datetime import datetime, timezone
-import json
+from datetime import datetime
 import logging
 from pathlib import Path
 import sqlite3

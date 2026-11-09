@@ -2,7 +2,7 @@
 Automated unit tests for Session Management, Persistence, and Agent Switching in AI Brain.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 import os
 import tempfile
 import unittest
@@ -14,7 +14,6 @@ from ai_brain.agents import (
     ResearchAgent,
     ReviewAgent,
     SessionManager,
-    SessionRecord,
     SessionStatus,
     SQLiteSessionStore,
 )
@@ -22,12 +21,11 @@ from ai_brain.context import ContextBuilder, DeterministicTokenizer
 from ai_brain.events import SQLiteEventStore
 from ai_brain.events.types import EventType
 from ai_brain.graph import GraphIntegrator, KnowledgeGraph
-from ai_brain.loop import BrainLoop, SQLiteInteractionStore
+from ai_brain.loop import BrainLoop
 from ai_brain.memories import (
     ConflictDetector,
     ConflictManager,
     MemoryExtractor,
-    MemoryStatus,
     MemoryUpdater,
 )
 from ai_brain.retrieval import RetrievalEngine

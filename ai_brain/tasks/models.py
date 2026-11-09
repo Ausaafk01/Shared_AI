@@ -7,8 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, Dict, List, Optional
-import uuid
+from typing import Any, Dict, Optional
 
 
 class TaskStatus(StrEnum):

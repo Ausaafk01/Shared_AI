@@ -10,7 +10,7 @@ import hmac
 import logging
 import secrets
 import time
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple, Union
 import uuid
 
 import jwt
@@ -18,7 +18,6 @@ from jwt.exceptions import ExpiredSignatureError, InvalidAlgorithmError, PyJWTEr
 
 from ai_brain.auth.exceptions import (
     AlgorithmMismatchError,
-    AuthenticationError,
     InvalidTokenError,
     TokenExpiredError,
 )

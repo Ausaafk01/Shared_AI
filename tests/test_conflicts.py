@@ -6,15 +6,12 @@ from datetime import datetime, timezone, timedelta
 import unittest
 
 from ai_brain.memories.conflicts.detector import ConflictDetector
-from ai_brain.memories.conflicts.evaluator import ConflictAssessment, ConflictEvaluator
-from ai_brain.memories.conflicts.manager import ConflictManager, ConflictResolutionResult
+from ai_brain.memories.conflicts.evaluator import ConflictEvaluator
+from ai_brain.memories.conflicts.manager import ConflictManager
 from ai_brain.memories.conflicts.models import MemoryConflict
 from ai_brain.memories.conflicts.types import (
     ConflictStatus,
     ConflictType,
-    register_conflict_type,
-    unregister_conflict_type,
-    validate_status_transition,
 )
 from ai_brain.memories.exceptions import (
     ConflictValidationError,

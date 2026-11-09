@@ -2,7 +2,7 @@
 Persistent SQLite vector storage backend for AI Brain.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 import json
 import logging
 from pathlib import Path

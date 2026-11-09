@@ -8,8 +8,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from ai_brain.observability.metrics import get_metrics_registry
-from ai_brain.tasks.exceptions import WorkerError
-from ai_brain.tasks.models import TaskRecord, WorkerInfo, WorkerState
+from ai_brain.tasks.models import TaskRecord, WorkerInfo
 from ai_brain.tasks.registry import TaskHandlerRegistry
 from ai_brain.tasks.store import BaseTaskStore
 from ai_brain.tasks.worker import BackgroundWorker

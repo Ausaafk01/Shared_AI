@@ -4,7 +4,7 @@ Abstract base class for persistent Event Storage.
 
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Optional, Sequence
+from typing import Optional
 
 from ..models import Event
 from ..types import EventType

@@ -18,30 +18,25 @@ Covers:
 
 from __future__ import annotations
 
-import math
 import os
 import time
 import unittest
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any, List, Optional
+from typing import Optional
 
 import jwt
-import psycopg
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from ai_brain.auth import (
-    AgentCredentialRecord,
     AlgorithmMismatchError,
     AuthenticatedIdentity,
     AuthenticationError,
     AuthenticationService,
     AuthorizationService,
-    AuthStore,
     CreatedApiKey,
     CredentialExpiredError,
-    CredentialNotFoundError,
     CredentialRevokedError,
     IdentityType,
     InvalidTokenError,
@@ -53,7 +48,6 @@ from ai_brain.auth import (
     PrivilegeEscalationError,
     ProjectMemberRecord,
     ProjectRole,
-    ROLE_PERMISSIONS,
     SecurityAuditLogger,
     SQLiteAuthStore,
     TokenExpiredError,
@@ -62,23 +56,16 @@ from ai_brain.auth import (
     generate_api_key,
     has_permission,
     hash_api_key,
-    sanitize_audit_details,
     trusted_tenant_context,
     validate_agent_scopes,
     validate_membership_transition,
     verify_api_key,
 )
 from ai_brain.config import DatabaseConfig, StorageBackend, load_env_file
-from ai_brain.events.models import Event
-from ai_brain.events.storage.postgres import PostgreSQLEventStore
-from ai_brain.graph.models import GraphNode
-from ai_brain.graph.storage.postgres import PostgreSQLGraphStore
 from ai_brain.memories.models import Memory
 from ai_brain.memories.storage.postgres import PostgreSQLMemoryStore
 from ai_brain.memories.types import MemoryType
 from ai_brain.storage.database import DatabaseConnectionManager
-from ai_brain.vectors.models import VectorRecord
-from ai_brain.vectors.storage.postgres import PostgreSQLVectorStore
 
 load_env_file()
 

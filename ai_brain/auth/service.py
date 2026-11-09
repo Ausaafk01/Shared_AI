@@ -5,21 +5,17 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import logging
-from typing import Any, Generator, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Generator, Optional, Sequence
 import uuid
 
 from ai_brain.auth.audit import SecurityAuditLogger
-from ai_brain.auth.crypto import KeyManager, TokenService, generate_api_key, hash_api_key
+from ai_brain.auth.crypto import TokenService, generate_api_key, hash_api_key
 from ai_brain.auth.exceptions import (
     AuthenticationError,
     CredentialExpiredError,
     CredentialNotFoundError,
     CredentialRevokedError,
-    MembershipNotFoundError,
     PermissionDeniedError,
-    PrivilegeEscalationError,
-    ProjectNotFoundError,
-    UserNotFoundError,
 )
 from ai_brain.auth.models import (
     AgentCredentialRecord,
@@ -27,16 +23,14 @@ from ai_brain.auth.models import (
     CreatedApiKey,
     IdentityType,
     Permission,
-    ProjectMemberRecord,
     ProjectRole,
-    UserRecord,
 )
 from ai_brain.auth.permissions import (
     has_permission,
     validate_agent_scopes,
     validate_membership_transition,
 )
-from ai_brain.auth.store import AuthStore, PostgreSQLAuthStore, SQLiteAuthStore
+from ai_brain.auth.store import AuthStore
 from ai_brain.storage.database import DatabaseConnectionManager
 
 logger = logging.getLogger(__name__)

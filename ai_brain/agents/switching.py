@@ -2,7 +2,7 @@
 Agent switching coordinator facilitating handover between agents in a project.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 import logging
 from typing import Optional
 

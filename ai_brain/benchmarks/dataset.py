@@ -5,7 +5,7 @@ ground-truth expected outcomes, and distractor noise.
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional
 
 from ai_brain.benchmarks.models import (
     BenchmarkScenario,

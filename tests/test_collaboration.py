@@ -6,10 +6,8 @@ import unittest
 from unittest.mock import MagicMock
 
 from ai_brain.agents import (
-    AgentExecutionRequest,
     CodingAgent,
     CollaborationEngine,
-    CollaborationStep,
     CollaborationWorkflowError,
     ResearchAgent,
     ReviewAgent,

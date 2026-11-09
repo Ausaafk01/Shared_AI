@@ -2,16 +2,15 @@
 Vector retrieval integration utilizing the existing Vector Memory subsystem.
 """
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 import logging
-from typing import List, Optional, Sequence, Union
+from typing import List, Optional
 
 from ai_brain.retrieval.exceptions import ProjectIsolationError, VectorRetrievalError
 from ai_brain.retrieval.models import ProcessedQuery, QueryFilters
 from ai_brain.vectors.exceptions import EmbeddingProviderError, ProjectIsolationError as VecProjectIsolationError
 from ai_brain.vectors.index import VectorIndex
-from ai_brain.vectors.models import VectorMatch, VectorRecord, VectorSearchResult
+from ai_brain.vectors.models import VectorMatch, VectorSearchResult
 
 logger = logging.getLogger(__name__)
 

@@ -23,12 +23,11 @@ import tempfile
 import time
 import unittest
 import uuid
-from typing import Any, Dict
 
 from fastapi.testclient import TestClient
 
 from ai_brain.config import AppConfig, DatabaseConfig, StorageBackend, load_config_from_env
-from ai_brain.observability.logging import StructuredJsonFormatter, redact_sensitive_text
+from ai_brain.observability.logging import StructuredJsonFormatter
 from ai_brain.observability.metrics import (
     Counter,
     Gauge,
@@ -47,7 +46,7 @@ from ai_brain.tasks.cli import (
     write_heartbeat,
 )
 from ai_brain.tasks.fleet import WorkerFleet
-from ai_brain.tasks.models import TaskRecord, TaskResult, TaskStatus
+from ai_brain.tasks.models import TaskRecord, TaskStatus
 from ai_brain.tasks.worker import BackgroundWorker
 
 

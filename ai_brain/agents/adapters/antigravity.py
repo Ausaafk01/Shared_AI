@@ -4,10 +4,9 @@ Google Antigravity Agent provider adapter for AI Brain.
 
 import json
 import logging
-import os
 import shutil
 import subprocess
-from typing import Any, Callable, Dict, List, Mapping, Optional
+from typing import Any, Callable, Dict, Mapping, Optional
 
 from ai_brain.agents.adapters.base import ProviderAdapter, execute_http_request
 from ai_brain.agents.exceptions import (
@@ -15,7 +14,6 @@ from ai_brain.agents.exceptions import (
     ProviderAdapterError,
     ProviderAuthenticationError,
     ProviderConnectionError,
-    ProviderRateLimitError,
 )
 from ai_brain.agents.models import (
     AgentCapability,

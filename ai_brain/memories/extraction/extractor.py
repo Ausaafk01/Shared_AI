@@ -4,7 +4,7 @@ Orchestrator for AI Brain Memory Extraction.
 
 from collections import defaultdict
 import logging
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ai_brain.events.models import Event
 from ai_brain.memories.exceptions import (

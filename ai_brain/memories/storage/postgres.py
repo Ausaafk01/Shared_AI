@@ -5,11 +5,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import logging
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence
 
-import psycopg
 
-from ai_brain.memories.exceptions import MemoryNotFoundError, MemoryValidationError
+from ai_brain.memories.exceptions import MemoryValidationError
 from ai_brain.memories.models import Memory, _freeze_container, _unfreeze_container
 from ai_brain.memories.storage.base import MemoryStore
 from ai_brain.memories.types import MemoryStatus, normalize_memory_status

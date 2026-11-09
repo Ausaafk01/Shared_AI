@@ -3,7 +3,7 @@ Vector similarity search and indexing engine.
 """
 
 import math
-from typing import List, Optional, Sequence, Set, Tuple, Union
+from typing import List, Optional, Sequence, Tuple, Union
 
 from ai_brain.vectors.exceptions import (
     DimensionMismatchError,

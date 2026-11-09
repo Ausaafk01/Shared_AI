@@ -7,7 +7,7 @@ import json
 import math
 import re
 from types import MappingProxyType
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from ai_brain.memories.conflicts.detector import ConflictDetector
 from ai_brain.memories.conflicts.types import ConflictType

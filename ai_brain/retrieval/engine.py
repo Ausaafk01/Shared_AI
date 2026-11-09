@@ -11,18 +11,12 @@ from typing import Any, List, Optional, Sequence, Union
 from ai_brain.graph.graph import KnowledgeGraph
 from ai_brain.retrieval.exceptions import (
     GraphRetrievalError,
-    ProjectIsolationError,
-    QueryValidationError,
-    RetrievalError,
-    RetrievalExecutionError,
     VectorRetrievalError,
 )
 from ai_brain.retrieval.fusion import FusedCandidate, HybridFusion
 from ai_brain.retrieval.graph_retriever import GraphMatch, GraphRetriever
 from ai_brain.retrieval.models import (
-    ProcessedQuery,
     QueryFilters,
-    RetrievalItem,
     RetrievalResponse,
 )
 from ai_brain.retrieval.query import QueryProcessor

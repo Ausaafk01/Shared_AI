@@ -4,7 +4,7 @@ In-memory KnowledgeGraph implementation with strict project isolation.
 
 from collections import defaultdict
 import logging
-from typing import Dict, List, Optional, Sequence, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from ai_brain.graph.exceptions import (
     DuplicateNodeError,
@@ -12,7 +12,6 @@ from ai_brain.graph.exceptions import (
     GraphValidationError,
     NodeNotFoundError,
     ProjectIsolationError,
-    RelationshipNotFoundError,
 )
 from ai_brain.graph.models import GraphNode, GraphRelationship
 from ai_brain.graph.types import (

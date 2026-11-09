@@ -5,7 +5,6 @@ Evidence evaluation for MemoryConflict instances.
 from collections import defaultdict
 from dataclasses import dataclass, field
 import logging
-import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ai_brain.memories.conflicts.models import MemoryConflict

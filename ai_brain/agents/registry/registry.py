@@ -2,7 +2,7 @@
 Agent Registry managing lifecycle, configuration, and discovery of AI Brain agents.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 import logging
 from typing import Any, Dict, List, Mapping, Optional, Union
 

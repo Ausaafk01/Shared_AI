@@ -3,7 +3,7 @@ Base Agent interface and abstraction for AI Brain.
 """
 
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import datetime
 import logging
 import time
 from typing import Any, Iterator, List, Mapping, Optional

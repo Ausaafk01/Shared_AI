@@ -6,8 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any, Mapping, Optional, Sequence, Tuple
-import uuid
+from typing import Any, Mapping, Optional, Tuple
 
 
 class IdentityType(StrEnum):

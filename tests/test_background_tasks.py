@@ -23,47 +23,35 @@ from __future__ import annotations
 
 import concurrent.futures
 from datetime import datetime, timedelta, timezone
-import json
 import logging
 import os
 import threading
 import time
 import unittest
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from ai_brain.config import DatabaseConfig, StorageBackend, load_env_file
 from ai_brain.storage.database import DatabaseConnectionManager
 from ai_brain.tasks.exceptions import (
     DuplicateTaskError,
     PermanentTaskError,
-    TaskCancelledError,
     TaskFencingError,
-    TaskNotFoundError,
     TransientTaskError,
 )
 from ai_brain.tasks.fleet import WorkerFleet
-from ai_brain.tasks.handlers import (
-    handle_interaction_execution,
-    handle_memory_maintenance,
-    handle_workflow_step,
-    register_default_handlers,
-)
+from ai_brain.tasks.handlers import register_default_handlers
 from ai_brain.tasks.models import (
     RetryPolicy,
     TaskPriority,
     TaskRecord,
     TaskResult,
     TaskStatus,
-    WorkerInfo,
-    WorkerState,
 )
 from ai_brain.tasks.registry import TaskHandlerRegistry
 from ai_brain.tasks.store import (
-    BaseTaskStore,
     PostgreSQLTaskStore,
     SQLiteTaskStore,
-    create_task_store,
 )
 from ai_brain.tasks.worker import BackgroundWorker
 from ai_brain.server.dependencies import create_sqlite_container, create_postgres_container

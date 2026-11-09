@@ -54,8 +54,9 @@ def main() -> None:
     json_report = BenchmarkReporter.generate_json_report(aggregate, comparisons, stats)
 
     # Save to disk
-    report_md_path = os.path.join(os.path.dirname(__file__), "..", "benchmarks_report.md")
-    report_json_path = os.path.join(os.path.dirname(__file__), "..", "benchmarks_report.json")
+    report_md_path = os.path.join(os.path.dirname(__file__), "..", "docs", "benchmarks", "benchmarks_report.md")
+    report_json_path = os.path.join(os.path.dirname(__file__), "..", "docs", "benchmarks", "benchmarks_report.json")
+    os.makedirs(os.path.dirname(report_md_path), exist_ok=True)
 
     with open(report_md_path, "w", encoding="utf-8") as f:
         f.write(md_report)

@@ -2,6 +2,7 @@
 Comprehensive test suite for the Brain Loop subsystem.
 """
 
+from dataclasses import replace
 from datetime import datetime, timezone
 import gc
 import os
@@ -13,7 +14,7 @@ import warnings
 
 from ai_brain.config import DatabaseConfig, StorageBackend, load_env_file
 
-from ai_brain.context import ContextBuilder, DeterministicTokenizer
+from ai_brain.context import ContextBuilder, ContextPackage, DeterministicTokenizer
 from ai_brain.events import SQLiteEventStore
 from ai_brain.graph import GraphIntegrator, KnowledgeGraph
 from ai_brain.loop import (
@@ -25,6 +26,7 @@ from ai_brain.loop import (
     ExtractionStageError,
     InputProcessor,
     InputValidationError,
+    InteractionCompletionResult,
     InteractionContextResult,
     InteractionNotFoundError,
     InteractionRecord,
@@ -1589,6 +1591,238 @@ class TestBrainLoopReviewAndRecovery(unittest.TestCase):
             if str(r.relationship_type) == "CONTRADICTS"
         ]
         self.assertGreater(len(contradicts_rels), 0)
+
+    # --- 5. SIMP-002: InteractionRecord Simplification Invariants ---
+
+    def test_simp_002_mark_failed_preserves_all_fields_and_overrides(self) -> None:
+        """Verify _mark_failed uses replace() to preserve all forwarded fields and apply failure overrides."""
+        created_time = datetime(2026, 11, 1, 10, 0, 0, tzinfo=timezone.utc)
+        inp = AgentInteractionInput(
+            interaction_id="int-pop-1",
+            project_id="proj-pop",
+            agent_id="agent-pop",
+            session_id="sess-pop",
+            content="Pre-populated content",
+            idempotency_key="key-pop-1",
+            created_at=created_time,
+        )
+        ctx_pkg = ContextPackage(
+            project_id="proj-pop",
+            query="Pre-populated content",
+            token_budget=1000,
+            tokens_used=120,
+            remaining_tokens=880,
+        )
+        ctx_result = InteractionContextResult(
+            interaction_id="int-pop-1",
+            project_id="proj-pop",
+            agent_id="agent-pop",
+            session_id="sess-pop",
+            input_event_id="evt-inp-99",
+            context_event_id="evt-ctx-99",
+            context_package=ctx_pkg,
+            status=InteractionStatus.CONTEXT_PREPARED,
+        )
+        resp_obj = AgentResponseInput(
+            interaction_id="int-pop-1",
+            project_id="proj-pop",
+            agent_id="agent-pop",
+            session_id="sess-pop",
+            content="Pre-populated agent response",
+        )
+        comp_result = InteractionCompletionResult(
+            interaction_id="int-pop-1",
+            project_id="proj-pop",
+            agent_id="agent-pop",
+            session_id="sess-pop",
+            status=InteractionStatus.COMPLETED,
+            response_event_id="evt-resp-99",
+            completion_event_id="evt-comp-99",
+            warnings=("warn-1",),
+        )
+        populated_record = InteractionRecord(
+            interaction_id="int-pop-1",
+            project_id="proj-pop",
+            agent_id="agent-pop",
+            session_id="sess-pop",
+            input=inp,
+            status=InteractionStatus.INPUT_RECEIVED,
+            idempotency_key="key-pop-1",
+            current_stage="input_persisted",
+            stages_completed=("input_persisted",),
+            input_event_id="evt-inp-99",
+            context_event_id="evt-ctx-99",
+            context_result=ctx_result,
+            response=resp_obj,
+            response_event_id="evt-resp-99",
+            completion_event_id="evt-comp-99",
+            completion_result=comp_result,
+            error_message="Original error before transition",
+            warnings=("warn-1", "warn-2"),
+            created_at=created_time,
+            updated_at=created_time,
+        )
+        self.interaction_store.save(populated_record)
+
+        failed_record = self.loop._mark_failed(
+            populated_record,
+            stage="retrieval_stage",
+            error_message="New explicit failure error",
+        )
+
+        # Overrides applied correctly
+        self.assertEqual(failed_record.status, InteractionStatus.FAILED)
+        self.assertEqual(failed_record.current_stage, "retrieval_stage")
+        self.assertEqual(failed_record.error_message, "New explicit failure error")
+        self.assertGreaterEqual(failed_record.updated_at, created_time)
+        self.assertEqual(failed_record.updated_at.tzinfo, timezone.utc)
+
+        # All other 16 fields strictly preserved from populated_record
+        self.assertEqual(failed_record.interaction_id, populated_record.interaction_id)
+        self.assertEqual(failed_record.idempotency_key, populated_record.idempotency_key)
+        self.assertEqual(failed_record.project_id, populated_record.project_id)
+        self.assertEqual(failed_record.agent_id, populated_record.agent_id)
+        self.assertEqual(failed_record.session_id, populated_record.session_id)
+        self.assertIs(failed_record.input, populated_record.input)
+        self.assertEqual(failed_record.stages_completed, ("input_persisted",))
+        self.assertIsInstance(failed_record.stages_completed, tuple)
+        self.assertEqual(failed_record.input_event_id, "evt-inp-99")
+        self.assertEqual(failed_record.context_event_id, "evt-ctx-99")
+        self.assertIs(failed_record.context_result, ctx_result)
+        self.assertEqual(failed_record.context_result, ctx_result)
+        self.assertIs(failed_record.response, resp_obj)
+        self.assertEqual(failed_record.response, resp_obj)
+        self.assertEqual(failed_record.response_event_id, "evt-resp-99")
+        self.assertEqual(failed_record.completion_event_id, "evt-comp-99")
+        self.assertIs(failed_record.completion_result, comp_result)
+        self.assertEqual(failed_record.completion_result, comp_result)
+        self.assertEqual(failed_record.warnings, ("warn-1", "warn-2"))
+        self.assertIsInstance(failed_record.warnings, tuple)
+        self.assertEqual(failed_record.created_at, created_time)
+
+    def test_simp_002_complete_interaction_clears_error_message_and_preserves_state(self) -> None:
+        """Verify complete_interaction explicitly clears error_message even when record contains previous error."""
+        created_time = datetime(2026, 11, 1, 10, 0, 0, tzinfo=timezone.utc)
+        inp = AgentInteractionInput(
+            interaction_id="int-comp-clean",
+            project_id="proj-alpha",
+            agent_id="agent-claude",
+            session_id="sess-01",
+            content="Input to complete",
+            idempotency_key="key-clean-1",
+            created_at=created_time,
+        )
+        self.loop.prepare_context(inp)
+
+        # Deliberately pollute the stored record with a prior error_message and custom warning
+        rec_before = self.interaction_store.get("int-comp-clean")
+        self.assertIsNotNone(rec_before)
+        polluted_record = replace(
+            rec_before,
+            error_message="Stale transient error from earlier retry attempt",
+            warnings=("stale-warning",),
+        )
+        self.interaction_store.save(polluted_record)
+
+        resp = AgentResponseInput(
+            interaction_id="int-comp-clean",
+            project_id="proj-alpha",
+            agent_id="agent-claude",
+            session_id="sess-01",
+            content="Task successfully completed by agent.",
+        )
+        comp_res = self.loop.complete_interaction(resp)
+        self.assertIsNotNone(comp_res)
+
+        final_record = self.interaction_store.get("int-comp-clean")
+        self.assertIsNotNone(final_record)
+
+        # Crucial SIMP-002 assertion: error_message MUST be cleared to None
+        self.assertIsNone(
+            final_record.error_message,
+            "complete_interaction must clear error_message to None even if record had a previous error",
+        )
+        self.assertEqual(final_record.status, comp_res.status)
+        self.assertEqual(final_record.current_stage, LoopStage.COMPLETED.value)
+        self.assertIn(LoopStage.COMPLETED.value, final_record.stages_completed)
+        self.assertIsInstance(final_record.stages_completed, tuple)
+        self.assertEqual(final_record.response.content, resp.content)
+        self.assertIsNotNone(final_record.completion_event_id)
+        self.assertIsNotNone(final_record.completion_result)
+        self.assertEqual(final_record.created_at, created_time)
+
+        # Assert final warnings equal expected tuple(all_warnings) behavior from comp_res
+        self.assertEqual(final_record.warnings, comp_res.warnings)
+        self.assertEqual(final_record.warnings, tuple(comp_res.warnings))
+        self.assertIsInstance(final_record.warnings, tuple)
+        # Explicitly verify the injected stale warning does not survive unless independently part of all_warnings
+        self.assertNotIn(
+            "stale-warning",
+            final_record.warnings,
+            "Injected stale warning must not survive completion unless independently part of all_warnings",
+        )
+
+    def test_simp_002_recovery_clears_error_message_and_preserves_state(self) -> None:
+        """Verify retry_failed_sync explicitly clears error_message even when record contains previous error."""
+        created_time = datetime(2026, 11, 1, 10, 0, 0, tzinfo=timezone.utc)
+        inp = AgentInteractionInput(
+            interaction_id="int-recov-clean",
+            project_id="proj-alpha",
+            agent_id="agent-claude",
+            session_id="sess-01",
+            content="Setup tech stack",
+            idempotency_key="key-recov-1",
+            created_at=created_time,
+        )
+        self.loop.prepare_context(inp)
+        resp = AgentResponseInput(
+            interaction_id="int-recov-clean",
+            project_id="proj-alpha",
+            agent_id="agent-claude",
+            session_id="sess-01",
+            content="The project uses PostgreSQL as its database.",
+        )
+        with patch.object(self.loop.vector_manager, "index_memory", side_effect=RuntimeError("Vector timeout")):
+            comp = self.loop.complete_interaction(resp)
+        self.assertEqual(comp.status, InteractionStatus.PARTIAL_SUCCESS)
+
+        # Stored record is completed with PARTIAL_SUCCESS. Deliberately pollute record with an error_message and stale warning
+        rec_before = self.interaction_store.get("int-recov-clean")
+        self.assertIsNotNone(rec_before)
+        polluted_record = replace(
+            rec_before,
+            error_message="Downstream sync warning recorded on record",
+            warnings=("stale-recovery-warning",),
+        )
+        self.interaction_store.save(polluted_record)
+
+        # Execute recovery
+        res = self.loop.retry_failed_sync("int-recov-clean")
+        self.assertIsNotNone(res)
+        self.assertEqual(res.status, InteractionStatus.COMPLETED)
+
+        recovered_record = self.interaction_store.get("int-recov-clean")
+        self.assertIsNotNone(recovered_record)
+
+        # Crucial SIMP-002 assertion: error_message MUST be cleared to None on recovery
+        self.assertIsNone(
+            recovered_record.error_message,
+            "recover_interaction must clear error_message to None on recovery",
+        )
+        self.assertEqual(recovered_record.status, InteractionStatus.COMPLETED)
+        self.assertEqual(recovered_record.created_at, created_time)
+        self.assertIsInstance(recovered_record.stages_completed, tuple)
+
+        # Assert recovered warnings equal expected tuple(new_warnings) behavior from res
+        self.assertEqual(recovered_record.warnings, res.warnings)
+        self.assertEqual(recovered_record.warnings, tuple(res.warnings))
+        self.assertIsInstance(recovered_record.warnings, tuple)
+        # Verify injected stale warning does not survive unless recovery logic independently includes it
+        self.assertNotIn(
+            "stale-recovery-warning",
+            recovered_record.warnings,
+            "Injected stale warning must not survive recovery unless recovery logic independently includes it",
+        )
 
 
 

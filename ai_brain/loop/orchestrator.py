@@ -2,6 +2,7 @@
 Brain Loop orchestrator coordinating the complete interaction lifecycle.
 """
 
+from dataclasses import replace
 from datetime import datetime, timezone
 import logging
 from typing import Any, Callable, List, Optional, Sequence, Tuple, Union
@@ -203,26 +204,11 @@ class BrainLoop:
         error_message: str,
     ) -> InteractionRecord:
         """Persist stage failure on the interaction record."""
-        failed_record = InteractionRecord(
-            interaction_id=record.interaction_id,
-            idempotency_key=record.idempotency_key,
-            project_id=record.project_id,
-            agent_id=record.agent_id,
-            session_id=record.session_id,
+        failed_record = replace(
+            record,
             status=InteractionStatus.FAILED,
             current_stage=stage,
-            stages_completed=record.stages_completed,
-            input=record.input,
-            input_event_id=record.input_event_id,
-            context_event_id=record.context_event_id,
-            context_result=record.context_result,
-            response=record.response,
-            response_event_id=record.response_event_id,
-            completion_event_id=record.completion_event_id,
-            completion_result=record.completion_result,
             error_message=error_message,
-            warnings=record.warnings,
-            created_at=record.created_at,
             updated_at=datetime.now(timezone.utc),
         )
         self.interaction_store.save(failed_record)
@@ -673,25 +659,20 @@ class BrainLoop:
         )
 
         stages = tuple(record.stages_completed) + (LoopStage.COMPLETED.value,)
-        completed_record = InteractionRecord(
-            interaction_id=iid,
-            idempotency_key=record.idempotency_key,
+        completed_record = replace(
+            record,
             project_id=validated_response.project_id,
             agent_id=validated_response.agent_id,
             session_id=validated_response.session_id,
-            input=record.input,
             status=final_status,
             current_stage=LoopStage.COMPLETED.value,
             stages_completed=stages,
-            input_event_id=record.input_event_id,
-            context_event_id=record.context_event_id,
-            context_result=record.context_result,
             response=validated_response,
             response_event_id=response_event_id,
             completion_event_id=completion_event.event_id,
             completion_result=completion_result,
+            error_message=None,
             warnings=tuple(all_warnings),
-            created_at=record.created_at,
             updated_at=datetime.now(timezone.utc),
         )
         self.interaction_store.save(completed_record)
@@ -813,25 +794,12 @@ class BrainLoop:
             created_at=datetime.now(timezone.utc),
         )
 
-        updated_record = InteractionRecord(
-            interaction_id=record.interaction_id,
-            idempotency_key=record.idempotency_key,
-            project_id=record.project_id,
-            agent_id=record.agent_id,
-            session_id=record.session_id,
-            input=record.input,
+        updated_record = replace(
+            record,
             status=new_status,
-            current_stage=record.current_stage,
-            stages_completed=record.stages_completed,
-            input_event_id=record.input_event_id,
-            context_event_id=record.context_event_id,
-            context_result=record.context_result,
-            response=record.response,
-            response_event_id=record.response_event_id,
-            completion_event_id=record.completion_event_id,
             completion_result=updated_res,
+            error_message=None,
             warnings=tuple(new_warnings),
-            created_at=record.created_at,
             updated_at=datetime.now(timezone.utc),
         )
         self.interaction_store.save(updated_record)

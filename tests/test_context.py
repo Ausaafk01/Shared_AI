@@ -779,6 +779,54 @@ class TestDisputedMemoryAndBudgetPolicy(unittest.TestCase):
         self.assertEqual(original_item.source_event_ids, raw_events)
         self.assertEqual(original_item.metadata["custom_field"], "immutable_value")
 
+    def test_10_context_compressor_normalization_with_dataclass_replace(self) -> None:
+        """ContextCompressor safely normalizes whitespace via dataclasses.replace without mutating others."""
+        from dataclasses import fields
+        from ai_brain.context.compressor import ContextCompressor
+        from ai_brain.context.models import PriorityBreakdown
+
+        compressor = ContextCompressor(enable_claim_merging=False)
+        item = _create_test_retrieval_item(
+            memory_id="mem-norm-test",
+            content="Line 1   with   spaces.\n\n\n\nLine 2.",
+            score=0.91,
+            source_agent_ids=("agent-a",),
+            source_event_ids=("ev-1",),
+        )
+        breakdown = PriorityBreakdown(
+            relevance_score=0.91,
+            importance_score=0.8,
+            confidence_score=1.0,
+            type_bonus=1.1,
+            recency_factor=1.0,
+            status_multiplier=1.0,
+            final_priority=0.95,
+        )
+
+        compressed = compressor.compress([(item, 0.95, breakdown)])
+        self.assertEqual(len(compressed), 1)
+        cleaned_item, prio, bd = compressed[0]
+
+        # Normalized content
+        self.assertEqual(cleaned_item.content, "Line 1 with spaces.\n\nLine 2.")
+
+        # Verify every RetrievalItem dataclass field except content is identical
+        for f in fields(cleaned_item):
+            if f.name == "content":
+                continue
+            self.assertEqual(
+                getattr(cleaned_item, f.name),
+                getattr(item, f.name),
+                f"Field '{f.name}' was not preserved across dataclass normalization",
+            )
+
+        # Assert returned PriorityBreakdown and priority score are unchanged
+        self.assertEqual(bd, breakdown)
+        self.assertEqual(prio, 0.95)
+
+        # Original item content unmutated
+        self.assertEqual(item.content, "Line 1   with   spaces.\n\n\n\nLine 2.")
+
 
 if __name__ == "__main__":
     unittest.main()

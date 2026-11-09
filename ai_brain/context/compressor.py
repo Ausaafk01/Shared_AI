@@ -2,6 +2,7 @@
 Context compression and deduplication for Context Builder.
 """
 
+from dataclasses import replace
 import re
 from typing import Sequence
 
@@ -49,26 +50,7 @@ class ContextCompressor:
             norm_content = _normalize_text(item.content)
             if norm_content != item.content:
                 # Create a shallow updated copy with normalized content
-                cleaned_item = RetrievalItem(
-                    memory_id=item.memory_id,
-                    root_memory_id=item.root_memory_id,
-                    version=item.version,
-                    project_id=item.project_id,
-                    content=norm_content,
-                    memory_type=item.memory_type,
-                    status=item.status,
-                    score=item.score,
-                    score_breakdown=item.score_breakdown,
-                    vector_score=item.vector_score,
-                    graph_score=item.graph_score,
-                    graph_metadata=item.graph_metadata,
-                    sources=item.sources,
-                    source_event_ids=item.source_event_ids,
-                    source_agent_ids=item.source_agent_ids,
-                    is_disputed=item.is_disputed,
-                    created_at=item.created_at,
-                    metadata=item.metadata,
-                )
+                cleaned_item = replace(item, content=norm_content)
                 cleaned_items.append((cleaned_item, priority, breakdown))
             else:
                 cleaned_items.append((item, priority, breakdown))

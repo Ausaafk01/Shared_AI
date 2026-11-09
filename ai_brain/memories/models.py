@@ -3,7 +3,7 @@ Memory model for the AI Brain Memory System.
 """
 
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 import json
 from types import MappingProxyType
@@ -304,24 +304,32 @@ class Memory:
         if self.created_at > effective_updated:
             effective_updated = self.created_at
 
-        return Memory(
-            memory_id=memory_id or str(uuid.uuid4()),
-            memory_type=self.memory_type,
-            content=content if content is not None else self.content,
-            project_id=self.project_id,
-            created_at=self.created_at,
-            updated_at=effective_updated,
-            source_event_ids=new_source_events,
-            source_agent_ids=new_source_agents,
-            importance=importance if importance is not None else self.importance,
-            confidence=confidence if confidence is not None else self.confidence,
-            status=status if status is not None else self.status,
-            relationships=relationships if relationships is not None else dict(self.relationships),
-            metadata=metadata if metadata is not None else dict(self.metadata),
-            root_memory_id=root_memory_id if root_memory_id is not None else self.root_memory_id,
-            parent_memory_id=parent_memory_id if parent_memory_id is not None else self.parent_memory_id,
-            version=version if version is not None else self.version,
-        )
+        updates: dict[str, Any] = {
+            "memory_id": memory_id or str(uuid.uuid4()),
+            "updated_at": effective_updated,
+            "source_event_ids": new_source_events,
+            "source_agent_ids": new_source_agents,
+        }
+        if content is not None:
+            updates["content"] = content
+        if status is not None:
+            updates["status"] = status
+        if importance is not None:
+            updates["importance"] = importance
+        if confidence is not None:
+            updates["confidence"] = confidence
+        if relationships is not None:
+            updates["relationships"] = relationships
+        if metadata is not None:
+            updates["metadata"] = metadata
+        if parent_memory_id is not None:
+            updates["parent_memory_id"] = parent_memory_id
+        if version is not None:
+            updates["version"] = version
+        if root_memory_id is not None:
+            updates["root_memory_id"] = root_memory_id
+
+        return replace(self, **updates)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the Memory into a standard Python dictionary."""

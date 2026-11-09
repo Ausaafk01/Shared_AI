@@ -4,6 +4,7 @@ Automated tests for the Memory model, validation, immutability, and serializatio
 
 from dataclasses import FrozenInstanceError
 from datetime import datetime, timezone, timedelta
+from types import MappingProxyType
 import unittest
 
 from ai_brain.memories.exceptions import MemoryValidationError
@@ -454,6 +455,122 @@ class TestMemoryModel(unittest.TestCase):
                 "created_at": "bad-timestamp",
                 "updated_at": "2026-11-02T10:00:00Z",
             })
+
+    def test_with_updates_default_preserves_fields_and_generates_id(self) -> None:
+        """Test with_updates() without parameters preserves all attributes and generates a fresh ID."""
+        now = datetime(2026, 11, 2, 12, 0, 0, tzinfo=timezone.utc)
+        mem = Memory.create(
+            memory_type=MemoryType.FACT,
+            content="Original content",
+            project_id="proj-upd",
+            created_at=now,
+            updated_at=now,
+            importance=0.75,
+            confidence=0.95,
+            source_event_ids=["ev-1", "ev-2"],
+            source_agent_ids=["ag-1"],
+            relationships={"relates_to": "m-other"},
+            metadata={"meta_key": "meta_val"},
+            root_memory_id="root-1",
+            parent_memory_id="parent-1",
+            version=2,
+        )
+
+        updated = mem.with_updates()
+        # Fresh ID generated
+        self.assertNotEqual(updated.memory_id, mem.memory_id)
+        # updated_at advanced
+        self.assertGreaterEqual(updated.updated_at, mem.updated_at)
+        # All other fields preserved
+        self.assertEqual(updated.memory_type, mem.memory_type)
+        self.assertEqual(updated.content, mem.content)
+        self.assertEqual(updated.project_id, mem.project_id)
+        self.assertEqual(updated.created_at, mem.created_at)
+        self.assertEqual(updated.importance, mem.importance)
+        self.assertEqual(updated.confidence, mem.confidence)
+        self.assertEqual(updated.status, mem.status)
+        self.assertEqual(updated.source_event_ids, mem.source_event_ids)
+        self.assertEqual(updated.source_agent_ids, mem.source_agent_ids)
+        self.assertEqual(updated.relationships, mem.relationships)
+        self.assertEqual(updated.metadata, mem.metadata)
+        self.assertEqual(updated.root_memory_id, mem.root_memory_id)
+        self.assertEqual(updated.parent_memory_id, mem.parent_memory_id)
+        self.assertEqual(updated.version, mem.version)
+
+    def test_with_updates_field_overrides_and_validation(self) -> None:
+        """Test with_updates() applies field overrides, normalizes status, and validates bounds."""
+        initial_time = datetime(2026, 11, 1, 10, 0, 0, tzinfo=timezone.utc)
+        mem = Memory.create(
+            memory_type=MemoryType.FACT,
+            content="Initial specification",
+            project_id="proj-upd",
+            created_at=initial_time,
+            updated_at=initial_time,
+            importance=0.5,
+            status=MemoryStatus.ACTIVE,
+        )
+
+        custom_id = "mem-custom-123"
+        custom_time = datetime(2026, 11, 5, 10, 0, 0, tzinfo=timezone.utc)
+        updated = mem.with_updates(
+            memory_id=custom_id,
+            content="Updated specification with extra detail",
+            status=MemoryStatus.DISPUTED,
+            importance=0.85,
+            confidence=0.70,
+            updated_at=custom_time,
+            source_event_ids=["ev-new"],
+            source_agent_ids=["ag-new"],
+            relationships={"ref": "node-1"},
+            metadata={"source": "review"},
+            parent_memory_id=mem.memory_id,
+            root_memory_id=mem.memory_id,
+            version=2,
+        )
+
+        self.assertEqual(updated.memory_id, custom_id)
+        self.assertEqual(updated.content, "Updated specification with extra detail")
+        self.assertEqual(updated.status, "DISPUTED")
+        self.assertEqual(updated.importance, 0.85)
+        self.assertEqual(updated.confidence, 0.70)
+        self.assertEqual(updated.updated_at, custom_time)
+        self.assertEqual(updated.source_event_ids, ("ev-new",))
+        self.assertEqual(updated.source_agent_ids, ("ag-new",))
+        self.assertEqual(dict(updated.relationships), {"ref": "node-1"})
+        self.assertEqual(dict(updated.metadata), {"source": "review"})
+        self.assertEqual(updated.parent_memory_id, mem.memory_id)
+        self.assertEqual(updated.root_memory_id, mem.memory_id)
+        self.assertEqual(updated.version, 2)
+
+        # Validation on post_init via replace: invalid importance raises MemoryValidationError
+        with self.assertRaises(MemoryValidationError):
+            mem.with_updates(importance=1.5)
+
+        # Empty content raises MemoryValidationError
+        with self.assertRaises(MemoryValidationError):
+            mem.with_updates(content="")
+
+    def test_with_updates_immutability_and_unknown_kwargs(self) -> None:
+        """Test with_updates() preserves immutability and rejects unknown keyword arguments."""
+        mem = Memory.create(
+            memory_type=MemoryType.FACT,
+            content="Base content",
+            project_id="proj-upd",
+            metadata={"key": "val"},
+        )
+        updated = mem.with_updates(metadata={"new_key": "new_val"})
+
+        # Containers must be read-only MappingProxyType
+        self.assertIsInstance(updated.metadata, MappingProxyType)
+        with self.assertRaises(TypeError):
+            updated.metadata["key"] = "mutate"  # type: ignore
+
+        # Original remains untouched
+        self.assertEqual(dict(mem.metadata), {"key": "val"})
+
+        # Unknown kwargs must raise TypeError
+        with self.assertRaises(TypeError):
+            mem.with_updates(unsupported_kwarg="should_fail")  # type: ignore
 
 
 if __name__ == "__main__":
